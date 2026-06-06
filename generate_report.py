@@ -285,6 +285,11 @@ section{background:white;margin:0 auto 20px;max-width:1200px;padding:28px 32px;b
 tr.cloud-row td{background:#FFF3E0!important}
 tr.cloud-row.alt td{background:#FFE8C6!important}
 
+/* EXPORT BUTTON */
+.export-btn{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;font-size:11px;font-weight:600;color:#0090B0;background:white;border:1.5px solid #0090B0;border-radius:4px;cursor:pointer;text-decoration:none;transition:all .15s;float:right;margin-top:-2px}
+.export-btn:hover{background:#0090B0;color:white}
+@media print{.export-btn{display:none}}
+
 /* FOOTER */
 footer{text-align:center;padding:20px;color:#A0AABA;font-size:11px;border-top:1px solid #D0D6E0;margin:0 auto;max-width:1200px}
 
@@ -634,6 +639,21 @@ def build_html(json_path, out_path):
             col_align={1:'center', 3:'center', 4:'center', 5:'center'}
         ) if _covered_rows else ''
 
+        # Build CSV data for KAC cluster export
+        _kac_csv_rows = [['Cluster', 'Cloud', 'Region', 'KAC', 'IAR', 'KAC Last Seen', 'Build']]
+        for c in _covered_rows:
+            ac = c.get('agent_coverage', {})
+            cp = c.get('cloud_provider_info', {})
+            _kac_csv_rows.append([
+                c.get('cluster_name') or c.get('cluster_id', '')[:16],
+                cp.get('cloud_provider') or '',
+                cp.get('cloud_region') or '',
+                'Yes' if ac.get('kac_coverage') else 'No',
+                'Yes' if ac.get('iar_coverage') else 'No',
+                (ac.get('kac_last_seen') or '')[:10],
+                ac.get('kac_config_build') or '',
+            ])
+
         kac_section = f"""
   <div class="sub-t">Admission Control &amp; Image Assessment at Runtime</div>
   <p class="note">
@@ -679,7 +699,7 @@ def build_html(json_path, out_path):
     </div>
   </div>
   {'<div class="sub-t" style="font-size:11px;margin-top:16px;margin-bottom:8px">KAC Agent Build Versions</div>' + _kac_build_tbl if _kac_build_tbl else ''}
-  {'<div class="sub-t" style="font-size:11px;margin-top:20px;margin-bottom:8px">Clusters with KAC / IAR Deployed</div>' + _kac_cluster_tbl if _kac_cluster_tbl else ''}
+  {'<div style="display:flex;align-items:center;justify-content:space-between;margin-top:20px;margin-bottom:8px"><span class="sub-t" style="font-size:11px;margin:0">Clusters with KAC / IAR Deployed</span><button class="export-btn" onclick="exportCSV(\'kac_clusters\')">&#8595; Export CSV</button></div>' + _kac_cluster_tbl if _kac_cluster_tbl else ''}
 """
 
         s4 = f"""
@@ -712,6 +732,10 @@ def build_html(json_path, out_path):
 <div class="pb"></div>"""
 
     # ── S5: UNSUPPORTED ────────────────────────────────────────
+    if '_kac_csv_rows' not in dir():
+        _kac_csv_rows = [['Cluster','Cloud','Region','KAC','IAR','KAC Last Seen','Build']]
+    if '_unmanaged_csv_rows' not in dir():
+        _unmanaged_csv_rows = [['Hostname','Discoverer','Platform','OS Version','IP Address','Cloud Provider','Confidence','Container Signal','First Seen','Last Seen']]
     unsp      = cov_sum.get('unsupported', {})
     unsp_plat = unsp.get('by_platform', {})
     unsp_prod = unsp.get('by_product_type', {})
@@ -746,6 +770,8 @@ def build_html(json_path, out_path):
                 r.get('platform_name') or 'ZZZ',
                 r.get('last_seen_timestamp') or '')
 
+    # Build CSV data for unmanaged assets export
+    _unmanaged_csv_rows = [['Hostname','Discoverer','Platform','OS Version','IP Address','Cloud Provider','Confidence','Container Signal','First Seen','Last Seen']]
     rows_html = ''
     for i, r in enumerate(sorted(unmanaged_records, key=_sort_key)):
         _raw_id    = r.get('id', '')
@@ -776,10 +802,25 @@ def build_html(json_path, out_path):
             f'<td style="text-align:center;color:{hint_color};font-weight:{"700" if hint=="likely" else "400"}">{hint}</td>'
             f'</tr>'
         )
+        _unmanaged_csv_rows.append([
+            r.get('hostname') or _disc_host or _id_suffix[:32],
+            _disc_host or '',
+            r.get('platform_name') or '',
+            r.get('os_version') or '',
+            ip,
+            r.get('cloud_provider') or '',
+            str(confidence) + '%' if confidence != '' else '',
+            hint,
+            (r.get('first_seen_timestamp') or '')[:10],
+            (r.get('last_seen_timestamp') or '')[:10],
+        ])
 
     s7 = f"""
 <section id="s7">
-  {_sh(7, f"Appendix — Unmanaged Asset List ({_fmt(unmanaged)} hosts)", ORANGE)}
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px">
+    {_sh(7, f"Appendix — Unmanaged Asset List ({_fmt(unmanaged)} hosts)", ORANGE)}
+    <button class="export-btn" onclick="exportCSV('unmanaged_assets')">&#8595; Export CSV</button>
+  </div>
   <p class="note">
     Assets capable of running the Falcon sensor with no sensor installed. &nbsp;
     <span style="background:#FFF3E0;padding:1px 6px;border-radius:3px;color:{ORANGE}">Amber rows</span> = cloud-hosted. &nbsp;
@@ -825,6 +866,31 @@ def build_html(json_path, out_path):
         f'CONFIDENTIAL — authorized personnel only</footer>'
     )
 
+    _js_data = json.dumps({
+        'unmanaged_assets': {'filename': 'unmanaged_assets.csv', 'rows': _unmanaged_csv_rows},
+        'kac_clusters':     {'filename': 'kac_iar_clusters.csv',  'rows': _kac_csv_rows},
+    }, ensure_ascii=False)
+
+    _js = f"""<script>
+var CSV_DATA = {_js_data};
+function exportCSV(key) {{
+    var d = CSV_DATA[key];
+    if (!d) return;
+    var csv = d.rows.map(function(row) {{
+        return row.map(function(cell) {{
+            var s = String(cell == null ? '' : cell).replace(/"/g, '""');
+            return /[,\\n"]/.test(s) ? '"' + s + '"' : s;
+        }}).join(',');
+    }}).join('\\n');
+    var blob = new Blob([csv], {{type: 'text/csv'}});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = d.filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+}}
+</script>"""
+
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -844,6 +910,7 @@ def build_html(json_path, out_path):
 {s6}
 {s7}
 {footer}
+{_js}
 </body>
 </html>"""
 
