@@ -49,30 +49,34 @@ Create an API client in **Falcon console → Support & Resources → API Clients
 
 ### Required scopes for `hosts_inventory.py`
 
+These two scopes are needed to produce any meaningful report output:
+
 | Scope | Access | Used for |
 |---|---|---|
 | Hosts | Read | Managed hosts, hidden devices, online state |
-| Discover | Read | Unmanaged assets, coverage gaps |
-| Kubernetes Protection | Read | K8s clusters, nodes, KAC/IAR coverage |
+| Discover | Read | Unmanaged assets, coverage gaps, appendix |
 
 ### Optional scopes (script skips gracefully if missing)
 
-| Scope | Access | Used for |
+These scopes enable additional report sections. The report renders without them, but the relevant sections will be empty or absent.
+
+| Scope | Access | Enables in report |
 |---|---|---|
-| Cloud Security Assets | Read | Cloud asset inventory |
-| CSPM Registration | Read | Cloud account registration |
-| Host Groups | Read | Group membership |
-| Zero Trust Assessment | Read | ZTA scores |
-| Sensor Update Policy | Read | Policy membership |
-| Prevention Policy | Read | Policy membership |
-| Device Control Policies | Read | Policy membership |
-| Response Policies | Read | Policy membership |
-| Firewall Policies | Read | Policy membership |
-| Sensor Download | Read | Available sensor builds |
-| Installation Tokens | Read | Provisioning tokens |
-| Spotlight Vulnerabilities | Read | CVE exposure per host |
-| Spotlight Evaluation Logic | Read | Spotlight rule data |
-| Device Content | Read | Content state per device |
+| Kubernetes Protection | Read | Container Security section — K8s clusters, nodes, KAC/IAR coverage |
+| Cloud Security Assets | Read | Cloud asset inventory enrichment |
+| CSPM Registration | Read | Cloud account registration data |
+| Sensor Download | Read | Collected into JSON but not currently rendered in report |
+| Host Groups | Read | Group membership (JSON only, not in report) |
+| Zero Trust Assessment | Read | ZTA scores (JSON only, not in report) |
+| Sensor Update Policy | Read | Policy membership (JSON only, not in report) |
+| Prevention Policy | Read | Policy membership (JSON only, not in report) |
+| Device Control Policies | Read | Policy membership (JSON only, not in report) |
+| Response Policies | Read | Policy membership (JSON only, not in report) |
+| Firewall Policies | Read | Policy membership (JSON only, not in report) |
+| Installation Tokens | Read | Provisioning tokens (JSON only, not in report) |
+| Spotlight Vulnerabilities | Read | CVE exposure per host (JSON only, not in report) |
+| Spotlight Evaluation Logic | Read | Spotlight rule data (JSON only, not in report) |
+| Device Content | Read | Content state per device (JSON only, not in report) |
 
 ### Additional scopes for `k8s_container_inventory.py`
 
