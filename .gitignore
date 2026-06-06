@@ -1,0 +1,28 @@
+# Inventory data and generated reports
+falcon_hosts_inventory_*.json
+falcon_k8s_inventory_*.json
+falcon_asset_report_*.html
+falcon_asset_report_*.pdf
+
+# Keep test fixtures if you want — remove these lines to exclude them too
+# falcon_hosts_inventory_test.json
+# falcon_k8s_inventory_test.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Environment / credentials
+.env
+*.env
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/

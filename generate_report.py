@@ -1,0 +1,881 @@
+#!/usr/bin/env python3
+"""
+CrowdStrike Falcon — Executive Asset Inventory Report (HTML)
+Generates a self-contained HTML report from a falcon_hosts_inventory_*.json file.
+
+Usage:
+    python3 generate_report.py [inventory.json] [output.html]
+"""
+import json, sys, os, glob, math
+from datetime import datetime, timezone
+from collections import Counter
+
+# ── PALETTE ────────────────────────────────────────────────────
+RED    = '#C8001A'
+ORANGE = '#D96A00'
+GREEN  = '#007A4B'
+CYAN   = '#0090B0'
+DARK   = '#0D1520'
+GREY1  = '#1E2B3C'
+GREY2  = '#3A4A60'
+GREY3  = '#6A7A99'
+GREY4  = '#A0AABA'
+GREY5  = '#D0D6E0'
+GREY6  = '#F0F2F5'
+
+# ── UTILITIES ──────────────────────────────────────────────────
+def _rc(pct):
+    return RED if pct < 40 else (ORANGE if pct < 70 else GREEN)
+
+def _fmt(n):
+    try: return f"{int(n):,}"
+    except: return str(n)
+
+def _pct(part, total):
+    if not total: return '—'
+    return f"{part/total*100:.1f}%"
+
+def _format_ts(ts):
+    if not ts: return ''
+    try:
+        dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+        return dt.strftime('%Y-%m-%d %H:%M UTC')
+    except:
+        if len(ts) >= 16 and 'T' in ts:
+            return f"{ts[0:4]}-{ts[4:6]}-{ts[6:8]} {ts[9:11]}:{ts[11:13]} UTC"
+    return ts
+
+def _compute_container_status(hosts):
+    _CP = {'AWS_EKS_FARGATE', 'AZURE_CONTAINER_APPS', 'AWS_ECS_FARGATE'}
+    c = {'container': 0, 'k8s_node': 0, 'none': 0}
+    for h in hosts:
+        pt = h.get('product_type_desc', '')
+        dt = h.get('deployment_type', '')
+        sp = h.get('service_provider', '')
+        tags = ' '.join(h.get('tags') or []).lower()
+        if pt == 'Pod' or sp in _CP:
+            c['container'] += 1
+        elif (pt == 'Kubernetes Cluster' or dt == 'DaemonSet' or h.get('pod_namespace')
+              or 'k8s-worker' in tags or 'k8s-master' in tags or 'cluster/' in tags):
+            c['k8s_node'] += 1
+        else:
+            c['none'] += 1
+    return c
+
+def _container_hint(r):
+    provider = (r.get('cloud_provider') or '').upper()
+    resource = (r.get('cloud_resource_id') or '').lower()
+    hostname = (r.get('hostname') or '').lower()
+    os_ver   = (r.get('os_version') or '').lower()
+    if any(x in resource for x in ('ecs','eks','fargate','container','/pods/','task')):
+        return 'likely'
+    if any(x in hostname for x in ('fargate','ecs','eks','.k8s.','pod','container')):
+        return 'likely'
+    if any(x in os_ver for x in ('cos ','coreos','bottlerocket','talos','alpine')):
+        return 'likely'
+    if provider in ('AWS','AZURE','GCP') and r.get('platform_name') == 'Linux':
+        return 'possible'
+    return '—'
+
+def _recommendations(coverage, unmanaged, unsupported, managed, by_status, gap_by_plat, k8s_total):
+    recs = []
+    if coverage < 40:
+        recs.append(('CRITICAL', 'Expand Falcon Sensor Coverage Immediately',
+            f"Coverage is at {coverage:.0f}%, well below the recommended 95%+ threshold. "
+            f"{_fmt(unmanaged)} sensor-eligible assets have no protection. "
+            f"Prioritize deployment to Windows and Linux servers in the unmanaged gap list."))
+    elif coverage < 70:
+        recs.append(('HIGH', 'Improve Sensor Coverage',
+            f"Coverage at {coverage:.0f}% leaves {_fmt(unmanaged)} assets unprotected. "
+            f"Target 95%+ coverage by reviewing and deploying sensors to unmanaged assets."))
+    contained = (by_status or {}).get('contained', 0)
+    if contained:
+        recs.append(('HIGH', f'Investigate {_fmt(contained)} Contained Hosts',
+            f"{_fmt(contained)} managed hosts are in network containment, indicating active incident response. "
+            f"Ensure each containment is intentional and that remediation is in progress."))
+    top_gap = sorted(gap_by_plat.items(), key=lambda x:-x[1])[:1] if gap_by_plat else []
+    if top_gap:
+        plat, cnt = top_gap[0]
+        recs.append(('MEDIUM', f'Address {plat} Sensor Gap ({_fmt(cnt)} assets)',
+            f"{plat} has the largest unmanaged asset count ({_fmt(cnt)} devices). "
+            f"Review deployment blockers (group policy, packaging, connectivity) and create a remediation plan."))
+    if unsupported > 1000:
+        recs.append(('MEDIUM', 'Implement Compensating Controls for Unsupported Devices',
+            f"{_fmt(unsupported)} devices cannot run the Falcon sensor. "
+            f"Segment these on isolated network zones, apply stricter firewall rules, "
+            f"and consider third-party IoT security monitoring."))
+    if k8s_total:
+        recs.append(('LOW', 'Validate Kubernetes Coverage Completeness',
+            f"{_fmt(k8s_total)} Kubernetes pods have the sensor. "
+            f"Verify this matches expected pod counts across all namespaces and clusters. "
+            f"New deployments may not automatically inherit sensor coverage."))
+    return recs
+
+# ── HTML COMPONENTS ────────────────────────────────────────────
+def _gauge(pct, size=130):
+    r = int(size * 0.37)
+    circ = 2 * math.pi * r
+    filled = (min(max(pct, 0), 100) / 100) * circ
+    color = _rc(pct)
+    cx = cy = size // 2
+    return (
+        f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}">'
+        f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="{GREY5}" stroke-width="12"/>'
+        f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="{color}" stroke-width="12"'
+        f' stroke-dasharray="{filled:.2f} {circ:.2f}" transform="rotate(-90 {cx} {cy})"'
+        f' stroke-linecap="round"/>'
+        f'<text x="{cx}" y="{cy+9}" text-anchor="middle"'
+        f' font-family="system-ui,sans-serif" font-size="{int(size*0.18)}" font-weight="700" fill="{color}">{pct:.0f}%</text>'
+        f'<text x="{cx}" y="{cy+int(size*0.2)}" text-anchor="middle"'
+        f' font-family="system-ui,sans-serif" font-size="{int(size*0.073)}" fill="{GREY3}" letter-spacing="1">COVERAGE</text>'
+        f'</svg>'
+    )
+
+def _stat_grid(items, cols=4):
+    cards = ''.join(
+        f'<div class="sc"><div class="sc-v" style="color:{c}">{v}</div>'
+        f'<div class="sc-l">{l}</div></div>'
+        for l, v, c in items
+    )
+    return f'<div class="stat-grid" style="grid-template-columns:repeat({cols},1fr)">{cards}</div>'
+
+def _bar(label, count, total, color, truncate=40):
+    p = (count / total * 100) if total else 0
+    safe_label = str(label)[:truncate]
+    return (
+        f'<div class="br"><span class="br-l" title="{label}">{safe_label}</span>'
+        f'<span class="br-n">{_fmt(count)}</span>'
+        f'<div class="br-t"><div class="br-f" style="width:{p:.1f}%;background:{color}"></div></div>'
+        f'</div>'
+    )
+
+def _rank(title, items, total, color, max_rows=10):
+    rows = ''.join(_bar(k, v, total, color) for k, v in list(items)[:max_rows])
+    return f'<div class="rank"><div class="rank-hd">{title}</div>{rows}</div>'
+
+def _sh(num, title, color=RED):
+    return (
+        f'<div class="sh" style="border-color:{color}">'
+        f'<span class="sh-n" style="color:{color}">{num:02d}</span>'
+        f'<span class="sh-t">{title.upper()}</span>'
+        f'</div>'
+    )
+
+def _callout(title, body, color):
+    bg = color + '15'
+    return (
+        f'<div class="callout" style="border-color:{color};background:{bg}">'
+        f'<div class="callout-t" style="color:{color}">{title}</div>'
+        f'<div class="callout-b">{body}</div>'
+        f'</div>'
+    )
+
+def _badge(label, color):
+    return f'<span class="badge" style="background:{color};color:white">{label}</span>'
+
+def _table(headers, rows, col_align=None, row_classes=None):
+    ths = ''.join(f'<th>{h}</th>' for h in headers)
+    tbody = ''
+    for i, row in enumerate(rows):
+        rc = (row_classes[i] if row_classes else '') + (' alt' if i % 2 else '')
+        tds = ''.join(
+            f'<td style="text-align:{(col_align or {}).get(j,"left")}">{cell}</td>'
+            for j, cell in enumerate(row)
+        )
+        tbody += f'<tr class="{rc.strip()}">{tds}</tr>'
+    return f'<table class="dt"><thead><tr>{ths}</tr></thead><tbody>{tbody}</tbody></table>'
+
+def _rec(priority, title, body):
+    pc = RED if priority == 'CRITICAL' else (ORANGE if priority == 'HIGH' else (CYAN if priority == 'MEDIUM' else GREY3))
+    return (
+        f'<div class="rec" style="border-color:{pc}">'
+        f'<div class="rec-p" style="color:{pc};border-color:{pc}">{priority}</div>'
+        f'<div class="rec-t">{title}</div>'
+        f'<div class="rec-b">{body}</div>'
+        f'</div>'
+    )
+
+# ── CSS ────────────────────────────────────────────────────────
+CSS = """
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-size:14px;color:#1E2B3C;background:#EAECF0;line-height:1.5}
+
+/* NAV */
+.nav{position:sticky;top:0;z-index:200;background:#0D1520;display:flex;align-items:center;justify-content:space-between;padding:10px 28px;border-bottom:3px solid #C8001A;print-color-adjust:exact}
+.nav-brand{color:white;font-size:15px;font-weight:700;display:flex;align-items:center;gap:10px;letter-spacing:.3px}
+.nav-links{display:flex;gap:4px}
+.nav-links a{color:#A0AABA;text-decoration:none;font-size:11px;padding:4px 10px;border-radius:4px;transition:all .15s}
+.nav-links a:hover{color:white;background:#1E2B3C}
+
+/* COVER */
+.cover{background:white;margin:20px auto;max-width:1200px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,.12)}
+.cover-hdr{background:#0D1520;padding:22px 32px;display:flex;align-items:center;justify-content:space-between;border-top:4px solid #C8001A}
+.cover-brand{display:flex;align-items:center;gap:14px}
+.brand-nm{color:white;font-size:21px;font-weight:700;letter-spacing:.3px}
+.brand-sb{color:#A0AABA;font-size:13px;margin-top:3px}
+.cover-meta{color:#6A7A99;font-size:11px;text-align:right}
+.cover-body{padding:28px 32px}
+.exec-sum{color:#3A4A60;font-size:13px;line-height:1.75;margin-bottom:24px;max-width:900px}
+
+/* STAT GRID */
+.stat-grid{display:grid;gap:12px;margin-bottom:24px}
+.sc{background:#F0F2F5;border-radius:6px;padding:14px 16px;border:1px solid #D0D6E0}
+.sc-v{font-size:28px;font-weight:700;line-height:1;margin-bottom:5px}
+.sc-l{font-size:10px;color:#6A7A99;text-transform:uppercase;letter-spacing:.7px}
+
+/* GAUGE ROW */
+.gauge-row{display:flex;align-items:center;gap:24px;margin-top:8px}
+.gauge-wrap{flex-shrink:0}
+.callout{flex:1;padding:18px 22px;border-radius:6px;border:1.5px solid}
+.callout-t{font-size:18px;font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.callout-b{font-size:13px;color:#3A4A60}
+.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;vertical-align:middle}
+
+/* SECTIONS */
+section{background:white;margin:0 auto 20px;max-width:1200px;padding:28px 32px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.07)}
+.sh{display:flex;align-items:center;gap:12px;padding:12px 16px;background:#F0F2F5;border-left:4px solid;border-radius:4px;margin-bottom:22px}
+.sh-n{font-size:10px;font-weight:700;letter-spacing:1.5px}
+.sh-t{font-size:13px;font-weight:700;color:#0D1520;letter-spacing:.5px}
+
+/* TWO-COL */
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-bottom:20px;align-items:start}
+
+/* TYPOGRAPHY */
+.lead{font-size:13px;color:#1E2B3C;margin-bottom:16px}
+.note{font-size:11px;color:#6A7A99;margin-top:8px;margin-bottom:16px;line-height:1.6}
+.sub-t{font-size:11px;font-weight:700;color:#0D1520;text-transform:uppercase;letter-spacing:.7px;margin:22px 0 10px;padding-bottom:6px;border-bottom:1px solid #D0D6E0}
+
+/* RANK BARS */
+.rank{min-width:0}
+.rank-hd{font-size:10px;font-weight:700;color:#6A7A99;text-transform:uppercase;letter-spacing:.7px;margin-bottom:8px}
+.br{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #F0F2F5;font-size:12px}
+.br-l{flex:1;color:#3A4A60;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.br-n{font-weight:700;color:#0D1520;min-width:44px;text-align:right;font-size:12px;flex-shrink:0}
+.br-t{width:110px;height:8px;background:#D0D6E0;border-radius:4px;overflow:hidden;flex-shrink:0}
+.br-f{height:100%;border-radius:4px;transition:width .3s}
+
+/* DATA TABLE */
+.dt{width:100%;border-collapse:collapse;font-size:12px}
+.dt thead tr{background:#0D1520}
+.dt thead th{padding:9px 11px;font-weight:700;font-size:11px;color:white;text-align:left;white-space:nowrap}
+.dt tbody td{padding:8px 11px;border-bottom:1px solid #F0F2F5;vertical-align:middle}
+.dt tbody tr.alt td{background:#F8F9FB}
+.dt tbody tr:hover td{background:#EEF4FF}
+.chip-g{display:inline-block;padding:2px 8px;border-radius:3px;font-size:11px;background:#E0F4EC;color:#007A4B;font-weight:600}
+.chip-o{display:inline-block;padding:2px 8px;border-radius:3px;font-size:11px;background:#FFF3E0;color:#D96A00;font-weight:600}
+.chip-c{display:inline-block;padding:2px 8px;border-radius:3px;font-size:11px;background:#E0F4F8;color:#0090B0;font-weight:600}
+.mono{font-family:'SF Mono',Consolas,monospace;font-size:11px}
+
+/* ALERT */
+.alert{background:#FFE5E8;color:#C8001A;padding:10px 16px;border-radius:4px;border-left:3px solid #C8001A;font-size:13px;margin:16px 0}
+
+/* RECOMMENDATIONS */
+.recs{display:flex;flex-direction:column;gap:10px}
+.rec{padding:14px 16px 14px 18px;border-left:4px solid;background:#F8F9FB;border-radius:4px}
+.rec-p{display:inline-block;font-size:10px;font-weight:700;letter-spacing:1px;padding:2px 9px;border:1px solid;border-radius:10px;margin-bottom:7px}
+.rec-t{font-size:13px;font-weight:700;color:#0D1520;margin-bottom:4px}
+.rec-b{font-size:12px;color:#3A4A60;line-height:1.65}
+
+/* APPENDIX */
+.app-scroll{overflow-x:auto;border-radius:4px}
+.app-table{font-size:11px}
+.app-table td{padding:6px 9px}
+.app-table th{padding:8px 9px;font-size:10px}
+tr.cloud-row td{background:#FFF3E0!important}
+tr.cloud-row.alt td{background:#FFE8C6!important}
+
+/* FOOTER */
+footer{text-align:center;padding:20px;color:#A0AABA;font-size:11px;border-top:1px solid #D0D6E0;margin:0 auto;max-width:1200px}
+
+/* PAGE BREAK */
+.pb{display:none}
+
+/* PRINT */
+@media print{
+  body{background:white;font-size:11px}
+  .nav{display:none}
+  .cover,.section,section{max-width:100%;margin:0;border-radius:0;box-shadow:none;padding:20px 24px}
+  .pb{display:block;break-after:page}
+  .stat-grid{grid-template-columns:repeat(4,1fr)}
+  .sc-v{font-size:20px}
+  .app-table{font-size:9px}
+  .app-table td,.app-table th{padding:3px 6px}
+  .gauge-row{break-inside:avoid}
+  .rec{break-inside:avoid}
+}
+"""
+
+# ── BUILD ──────────────────────────────────────────────────────
+def build_html(json_path, out_path):
+    print(f"Loading {json_path}…")
+    with open(json_path) as f:
+        data = json.load(f)
+
+    meta       = data.get('_meta', {})
+    h_sum      = data.get('host_summary', {})
+    cl_sum     = data.get('cloud_summary', {})
+    k8s_sum    = data.get('kubernetes_summary', {})
+    cov_sum    = data.get('coverage_summary', {})
+    disc_hosts = data.get('discover_hosts', [])
+    gaps       = data.get('coverage_gaps', {})
+    raw_hosts  = data.get('hosts', [])
+
+    csc = h_sum.get('by_container_status') or _compute_container_status(raw_hosts)
+    container_hosts = csc.get('container', 0)
+    k8s_node_hosts  = csc.get('k8s_node', 0)
+
+    state_counts  = Counter(h.get('state','unknown') for h in data.get('online_state',[]))
+    online_count  = state_counts.get('online', 0)
+    offline_count = state_counts.get('offline', 0)
+
+    now = datetime.now(timezone.utc)
+    age_bkts = {'&lt; 24h':0,'1–7 days':0,'8–30 days':0,'31–90 days':0,'&gt; 90 days':0}
+    for h in raw_hosts:
+        ls = h.get('last_seen')
+        if not ls: continue
+        try:
+            seen = datetime.fromisoformat(ls.replace('Z','+00:00'))
+            if seen.tzinfo is None: seen = seen.replace(tzinfo=timezone.utc)
+            age = (now - seen).days
+            if   age < 1:  age_bkts['&lt; 24h'] += 1
+            elif age < 7:  age_bkts['1–7 days'] += 1
+            elif age < 30: age_bkts['8–30 days'] += 1
+            elif age < 90: age_bkts['31–90 days'] += 1
+            else:          age_bkts['&gt; 90 days'] += 1
+        except: pass
+
+    ts_display  = _format_ts(meta.get('generated_at',''))
+    cloud_name  = meta.get('cloud','us-1').upper()
+    managed     = cov_sum.get('managed_count', 0)
+    unmanaged   = cov_sum.get('unmanaged_count', 0)
+    unsupported = cov_sum.get('unsupported_count', 0)
+    manageable  = cov_sum.get('manageable_total', managed + unmanaged)
+    coverage    = cov_sum.get('sensor_coverage_pct', 0)
+    total_disc  = len(disc_hosts)
+    cloud_total = cl_sum.get('total', 0)
+    k8s_total   = k8s_sum.get('total', 0)
+    rc          = _rc(coverage)
+    risk_label  = 'CRITICAL' if coverage < 40 else ('MODERATE' if coverage < 70 else 'GOOD')
+
+    # ── COVER ──────────────────────────────────────────────────
+    summary = (
+        f"This report summarizes the Falcon sensor deployment posture as of <strong>{ts_display}</strong>. "
+        f"Of the <strong>{_fmt(manageable)}</strong> sensor-eligible assets, "
+        f"<strong>{_fmt(managed)}</strong> are currently protected "
+        f"({coverage:.1f}% coverage). "
+        f"<strong>{_fmt(unmanaged)}</strong> have no sensor installed, "
+        f"representing a <strong>{100-coverage:.0f}% coverage gap</strong>. "
+        f"Additionally, <strong>{_fmt(unsupported)}</strong> unsupported devices (IoT, network gear) "
+        f"were discovered that cannot run the Falcon sensor."
+    )
+    cover = f"""
+<div class="cover">
+  <div class="cover-hdr">
+    <div class="cover-brand">
+      <svg viewBox="0 0 40 46" width="30" height="35" style="flex-shrink:0">
+        <polygon points="20,1 38,11 38,35 20,45 2,35 2,11" fill="{RED}"/>
+      </svg>
+      <div>
+        <div class="brand-nm">CrowdStrike Falcon</div>
+        <div class="brand-sb">Asset Inventory — Executive Report</div>
+      </div>
+    </div>
+    <div class="cover-meta">Generated {ts_display}<br>Cloud: {cloud_name} &nbsp;·&nbsp; CONFIDENTIAL</div>
+  </div>
+  <div class="cover-body">
+    <p class="exec-sum">{summary}</p>
+    {_stat_grid([
+        ('Managed Hosts',    _fmt(managed),         GREEN),
+        ('Unmanaged Gap',    _fmt(unmanaged),        ORANGE),
+        ('Cloud Hosts',      _fmt(cloud_total),      CYAN),
+        ('Unsupported',      _fmt(unsupported),      RED),
+        ('Container Hosts',  _fmt(container_hosts),  CYAN),
+        ('K8s Nodes',        _fmt(k8s_node_hosts),   CYAN),
+        ('Online Now',       _fmt(online_count),     GREEN),
+        ('Total Discovered', _fmt(total_disc),       GREY2),
+    ], cols=4)}
+    <div class="gauge-row">
+      <div class="gauge-wrap">{_gauge(coverage, 140)}</div>
+      {_callout(
+          f'Sensor Coverage: {coverage:.1f}% &nbsp; {_badge(risk_label, rc)}',
+          f'{_fmt(managed)} of {_fmt(manageable)} sensor-eligible assets are protected &nbsp;·&nbsp; '
+          f'Coverage gap: <strong>{100-coverage:.1f}%</strong>',
+          rc
+      )}
+    </div>
+  </div>
+</div>
+<div class="pb"></div>"""
+
+    # ── S1: SENSOR COVERAGE ────────────────────────────────────
+    gap_by_plat = cov_sum.get('gap', {}).get('by_platform', {})
+    top_plat    = sorted(gap_by_plat.items(), key=lambda x:-x[1])[:10]
+    _ca_c2 = {1:'center', 2:'center'}
+
+    _s1_cov_table = _table(
+        ['Asset Category','Count','% of Sensor-Eligible'],
+        [
+            [f'<span class="chip-g">Managed (Falcon installed)</span>',  f'<strong>{_fmt(managed)}</strong>',    f'<strong>{coverage:.1f}%</strong>'],
+            [f'<span class="chip-o">Unmanaged (no sensor)</span>',        _fmt(unmanaged),   _pct(unmanaged, manageable)],
+            [f'<strong>Sensor-Eligible Total</strong>',                   f'<strong>{_fmt(manageable)}</strong>', '100%'],
+            ['Unsupported (IoT/network)',                                  _fmt(unsupported), 'N/A'],
+            ['All Discovered Assets',                                      _fmt(total_disc),  '—'],
+        ],
+        col_align={1:'center', 2:'center'}
+    )
+
+    s1 = f"""
+<section id="s1">
+  {_sh(1, "Sensor Coverage Analysis")}
+  <div class="two-col">
+    <div>
+      {_s1_cov_table}
+    </div>
+    <div>
+      {_rank('Unmanaged Assets by Platform', top_plat, unmanaged, ORANGE)}
+    </div>
+  </div>
+</section>
+<div class="pb"></div>"""
+
+    # ── S2: MANAGED HOSTS ──────────────────────────────────────
+    by_plat = h_sum.get('by_platform', {})
+    by_prod = h_sum.get('by_product_type', {})
+    by_os   = h_sum.get('by_os_version', {})
+    by_stat = h_sum.get('by_status', {})
+
+    contained = by_stat.get('contained', 0)
+    alert_html = (
+        f'<div class="alert">⚠ <strong>{_fmt(contained)} hosts are currently in network containment</strong>'
+        f' ({_pct(contained, managed)} of managed fleet).</div>'
+    ) if contained else ''
+
+    _s2_online_table = _table(
+        ['Status','Count','% of Managed'],
+        [
+            [f'<span class="chip-g">Online</span>', _fmt(online_count),  _pct(online_count, managed)],
+            ['Offline',                              _fmt(offline_count), _pct(offline_count, managed)],
+        ],
+        col_align={1:'center', 2:'center'}
+    )
+    _s2_age_table = _table(
+        ['Last Check-in','Hosts'],
+        [[k, _fmt(v)] for k, v in age_bkts.items() if v],
+        col_align={1:'center'}
+    )
+    _s2_cont_table = _table(
+        ['Asset Role','Count','% of Managed'],
+        [
+            [f'<span class="chip-c">Pods / Containers (IS a container)</span>', _fmt(container_hosts), _pct(container_hosts, managed)],
+            [f'<span class="chip-c">Kubernetes Nodes (runs containers)</span>',  _fmt(k8s_node_hosts),  _pct(k8s_node_hosts, managed)],
+        ],
+        col_align={1:'center', 2:'center'}
+    )
+
+    s2 = f"""
+<section id="s2">
+  {_sh(2, "Managed Hosts (Falcon Protected)")}
+  <div class="two-col">
+    {_rank('By Platform', sorted(by_plat.items(), key=lambda x:-x[1])[:8], managed, CYAN)}
+    {_rank('By Product Type', sorted(by_prod.items(), key=lambda x:-x[1])[:8], managed, GREEN)}
+  </div>
+
+  <div class="sub-t">Online Status</div>
+  <div class="two-col">
+    {_s2_online_table}
+    {_s2_age_table}
+  </div>
+  <p class="note"><strong>Offline</strong> = host not currently connected to Falcon cloud; does not indicate decommission. Last check-in tracks most recent sensor heartbeat.</p>
+
+  <div class="sub-t">Container &amp; Kubernetes Involvement</div>
+  {_s2_cont_table}
+  <p class="note"><strong>Container:</strong> product_type=Pod or EKS/ECS/ACA provider &nbsp;·&nbsp; <strong>K8s Node:</strong> DaemonSet, Kubernetes Cluster tag, or K8s worker</p>
+
+  {alert_html}
+
+  <div class="sub-t">Top OS Versions</div>
+  {''.join(_bar(k,v,managed,CYAN) for k,v in sorted(by_os.items(),key=lambda x:-x[1])[:12])}
+</section>
+<div class="pb"></div>"""
+
+    # ── S3: CLOUD & K8S ────────────────────────────────────────
+    by_provider = cl_sum.get('by_provider', {})
+    by_cl_plat  = cl_sum.get('by_platform', {})
+    by_acct     = cl_sum.get('by_account', {})
+    k8s_ns      = k8s_sum.get('by_namespace', {})
+    cloud_pct   = cloud_total / managed * 100 if managed else 0
+
+    s3 = f"""
+<section id="s3">
+  {_sh(3, "Cloud & Kubernetes Coverage", CYAN)}
+  <p class="lead"><strong>{_fmt(cloud_total)}</strong> of {_fmt(managed)} managed hosts ({cloud_pct:.0f}%) run in cloud environments.</p>
+
+  <div class="two-col">
+    {_rank('By Cloud Provider', sorted(by_provider.items(),key=lambda x:-x[1]), cloud_total, CYAN)}
+    {_rank('By Platform', sorted(by_cl_plat.items(),key=lambda x:-x[1]), cloud_total, GREEN)}
+  </div>
+
+  {'<div class="sub-t">Top Cloud Accounts by Host Count</div>' + "".join(_bar(k,v,cloud_total,CYAN) for k,v in sorted(by_acct.items(),key=lambda x:-x[1])[:12]) if by_acct else ''}
+
+  <div class="sub-t">Kubernetes Pods with Falcon Sensor</div>
+  <p class="lead"><strong>{_fmt(k8s_total)}</strong> Kubernetes pods are instrumented with the Falcon sensor.</p>
+  {''.join(_bar(k,v,k8s_total,CYAN) for k,v in sorted(k8s_ns.items(),key=lambda x:-x[1])[:12]) if k8s_ns else '<p class="note">No namespace data available.</p>'}
+</section>
+<div class="pb"></div>"""
+
+    # ── S4: CONTAINER SECURITY ─────────────────────────────────
+    k8s_inv         = data.get('k8s_nodes', {})
+    k8s_inv_summary = k8s_inv.get('summary', {}) if isinstance(k8s_inv, dict) else {}
+    s4 = ''
+    if k8s_inv_summary:
+        cov_data      = k8s_inv_summary.get('sensor_coverage', {})
+        mgd_ctrs      = k8s_inv_summary.get('managed_containers', {})
+        by_cloud      = k8s_inv_summary.get('nodes_by_cloud', {})
+        by_runtime    = k8s_inv_summary.get('nodes_by_runtime', {})
+        total_ctrs    = cov_data.get('total_containers', 0)
+        covered_ctrs  = cov_data.get('covered_containers', 0)
+        ctr_pct       = cov_data.get('coverage_pct', 0)
+        unmanaged_ctrs= mgd_ctrs.get('Unmanaged', 0)
+        ctr_color     = _rc(ctr_pct)
+        ctr_risk      = 'CRITICAL' if ctr_pct < 40 else ('MODERATE' if ctr_pct < 70 else 'GOOD')
+
+        nodes_list   = k8s_inv.get('nodes', [])
+        active_nodes = [n for n in nodes_list if n.get('resource_status') != 'deleted']
+        display_nodes= sorted(active_nodes, key=lambda n:(n.get('cluster_name') or '', n.get('node_name') or ''))[:25]
+
+        nodes_tbl = ''
+        if display_nodes:
+            nodes_tbl = (
+                '<div class="sub-t">Active K8s Nodes</div>'
+                + _table(
+                    ['Node','Cluster','Cloud','Region','Runtime','Sensor'],
+                    [
+                        [
+                            f'<span class="mono">{(n.get("node_name") or "")[-42:]}</span>',
+                            (n.get('cluster_name') or '')[:30],
+                            n.get('cloud_name') or '—',
+                            (n.get('cloud_region') or '—')[:18],
+                            (n.get('container_runtime_version') or '—').split('://')[0],
+                            f'<span style="color:{GREEN};font-weight:700">✓</span>' if n.get('linux_sensor_coverage')
+                            else f'<span style="color:{RED};font-weight:700">✗</span>',
+                        ]
+                        for n in display_nodes
+                    ],
+                    col_align={2:'center',3:'center',5:'center'}
+                )
+            )
+
+        # ── KAC / IAR coverage ──────────────────────────────────
+        clusters_list  = k8s_inv.get('clusters', [])
+        cluster_total  = len(clusters_list)
+        kac_clusters   = [c for c in clusters_list if c.get('agent_coverage', {}).get('kac_coverage')]
+        iar_clusters   = [c for c in clusters_list if c.get('agent_coverage', {}).get('iar_coverage')]
+        kac_count      = len(kac_clusters)
+        iar_count      = len(iar_clusters)
+        kac_pct        = kac_count / cluster_total * 100 if cluster_total else 0
+        iar_pct        = iar_count / cluster_total * 100 if cluster_total else 0
+        kac_gap        = cluster_total - kac_count
+        kac_color      = _rc(kac_pct)
+        iar_color      = _rc(iar_pct)
+
+        gap_clusters   = [c for c in clusters_list if not c.get('agent_coverage', {}).get('kac_coverage')]
+        gap_by_cloud   = Counter(c.get('cloud_provider_info', {}).get('cloud_provider') or 'Unknown'
+                                 for c in gap_clusters)
+        kac_builds     = Counter(c['agent_coverage'].get('kac_config_build', 'unknown')
+                                 for c in kac_clusters)
+
+        _kac_funnel = _table(
+            ['Stage', 'Clusters', '% of Total'],
+            [
+                ['All K8s Clusters',                                        _fmt(cluster_total), '100%'],
+                [f'<span style="color:{GREEN}">KAC Deployed</span>',  f'<strong>{_fmt(kac_count)}</strong>', f'<strong>{kac_pct:.1f}%</strong>'],
+                [f'<span style="color:{CYAN}">IAR Enabled</span>',    f'<strong>{_fmt(iar_count)}</strong>', f'<strong>{iar_pct:.1f}%</strong>'],
+                [f'<span style="color:{RED}">No KAC (gap)</span>',    f'<strong>{_fmt(kac_gap)}</strong>',   f'<strong>{(100-kac_pct):.1f}%</strong>'],
+            ],
+            col_align={1: 'center', 2: 'center'}
+        )
+
+        _gap_cloud_rows = sorted(gap_by_cloud.items(), key=lambda x: -x[1])
+        _kac_gap_tbl = _table(
+            ['Cloud Provider', 'Clusters Missing KAC'],
+            [[cp, _fmt(cnt)] for cp, cnt in _gap_cloud_rows],
+            col_align={1: 'center'}
+        ) if _gap_cloud_rows else ''
+
+        _build_rows = sorted(kac_builds.items(), key=lambda x: -x[1])
+        _kac_build_tbl = _table(
+            ['KAC Config Build', 'Clusters'],
+            [[b, _fmt(cnt)] for b, cnt in _build_rows],
+            col_align={1: 'center'}
+        ) if _build_rows else ''
+
+        def _check(v):
+            return f'<span style="color:{GREEN};font-weight:700">✓</span>' if v else f'<span style="color:{RED}">✗</span>'
+
+        _covered_rows = sorted(
+            [c for c in clusters_list if c.get('agent_coverage', {}).get('kac_coverage') or c.get('agent_coverage', {}).get('iar_coverage')],
+            key=lambda c: c.get('cluster_name') or ''
+        )
+        _kac_cluster_tbl = _table(
+            ['Cluster', 'Cloud', 'Region', 'KAC', 'IAR', 'KAC Last Seen', 'Build'],
+            [
+                [
+                    f'<span class="mono">{c.get("cluster_name") or c.get("cluster_id","")[:16]}</span>',
+                    c.get('cloud_provider_info', {}).get('cloud_provider') or '—',
+                    (c.get('cloud_provider_info', {}).get('cloud_region') or '—')[:22],
+                    _check(c['agent_coverage'].get('kac_coverage')),
+                    _check(c['agent_coverage'].get('iar_coverage')),
+                    (c['agent_coverage'].get('kac_last_seen') or '—')[:10],
+                    f'<span class="mono" style="font-size:10px">{c["agent_coverage"].get("kac_config_build","—")}</span>',
+                ]
+                for c in _covered_rows
+            ],
+            col_align={1:'center', 3:'center', 4:'center', 5:'center'}
+        ) if _covered_rows else ''
+
+        kac_section = f"""
+  <div class="sub-t">Admission Control &amp; Image Assessment at Runtime</div>
+  <p class="note">
+    <strong>KAC</strong> (Kubernetes Admission Controller) — enforces policy at workload admission time,
+    blocking or alerting on non-compliant images before they run.&nbsp;
+    <strong>IAR</strong> (Image Assessment at Runtime) — continuously assesses running container images
+    for vulnerabilities and misconfigurations.
+  </p>
+  {_stat_grid([
+      ('Clusters w/ KAC',  _fmt(kac_count),   kac_color),
+      ('KAC Coverage',     f'{kac_pct:.1f}%', kac_color),
+      ('Clusters w/ IAR',  _fmt(iar_count),   iar_color),
+      ('IAR Coverage',     f'{iar_pct:.1f}%', iar_color),
+      ('KAC Gap',          _fmt(kac_gap),     RED if kac_gap else GREY2),
+      ('KAC Builds',       _fmt(len(kac_builds)), GREY2),
+  ], cols=3)}
+  <div class="gauge-row" style="margin-top:8px">
+    <div class="gauge-wrap">
+      {_gauge(kac_pct, 130)}
+      <div style="text-align:center;font-size:10px;color:{GREY3};margin-top:4px">KAC</div>
+    </div>
+    <div class="gauge-wrap">
+      {_gauge(iar_pct, 130)}
+      <div style="text-align:center;font-size:10px;color:{GREY3};margin-top:4px">IAR</div>
+    </div>
+    <div style="flex:1">
+      {_callout(
+          f'KAC deployed on {kac_count} of {cluster_total} clusters &nbsp; {_badge("GAP" if kac_gap else "FULL COVERAGE", kac_color)}',
+          f'IAR enabled on {iar_count} clusters ({iar_pct:.1f}%). &nbsp;'
+          f'{kac_gap} clusters have no admission controller — workloads can deploy without policy enforcement.',
+          kac_color
+      )}
+    </div>
+  </div>
+  <div class="two-col" style="margin-top:16px">
+    <div>
+      <div class="sub-t" style="font-size:11px;margin-bottom:8px">Coverage Funnel</div>
+      {_kac_funnel}
+    </div>
+    <div>
+      <div class="sub-t" style="font-size:11px;margin-bottom:8px">Gap Clusters by Cloud</div>
+      {_kac_gap_tbl if _kac_gap_tbl else '<p class="note">No gap clusters.</p>'}
+    </div>
+  </div>
+  {'<div class="sub-t" style="font-size:11px;margin-top:16px;margin-bottom:8px">KAC Agent Build Versions</div>' + _kac_build_tbl if _kac_build_tbl else ''}
+  {'<div class="sub-t" style="font-size:11px;margin-top:20px;margin-bottom:8px">Clusters with KAC / IAR Deployed</div>' + _kac_cluster_tbl if _kac_cluster_tbl else ''}
+"""
+
+        s4 = f"""
+<section id="s4">
+  {_sh(4, "Container Security Coverage (Kubernetes Protection)", CYAN)}
+  {_stat_grid([
+      ('Total Containers',       _fmt(total_ctrs),                                              GREY2),
+      ('Containers w/ Falcon',   _fmt(covered_ctrs),                                            GREEN),
+      ('Unprotected Containers', _fmt(unmanaged_ctrs),                                          RED if unmanaged_ctrs else GREY2),
+      ('K8s Clusters',           _fmt(k8s_inv_summary.get('cluster_count',0)),                  CYAN),
+      ('K8s Nodes',              _fmt(k8s_inv_summary.get('node_count',0)),                     CYAN),
+      ('Pods',                   _fmt(k8s_inv_summary.get('pod_count',0)),                      CYAN),
+  ], cols=3)}
+  <div class="gauge-row">
+    <div class="gauge-wrap">{_gauge(ctr_pct, 140)}</div>
+    {_callout(
+        f'Container Coverage: {ctr_pct:.1f}% &nbsp; {_badge(ctr_risk, ctr_color)}',
+        f'{_fmt(covered_ctrs)} of {_fmt(total_ctrs)} containers have the Falcon sensor &nbsp;·&nbsp; '
+        f'{_fmt(unmanaged_ctrs)} containers are unprotected',
+        ctr_color
+    )}
+  </div>
+  <div class="two-col" style="margin-top:20px">
+    {_rank('Nodes by Cloud', sorted(by_cloud.items(),key=lambda x:-x[1]), k8s_inv_summary.get('node_count',1) or 1, CYAN)}
+    {_rank('Container Runtime', sorted(by_runtime.items(),key=lambda x:-x[1])[:8], k8s_inv_summary.get('node_count',1) or 1, GREEN)}
+  </div>
+  {nodes_tbl}
+  {kac_section}
+</section>
+<div class="pb"></div>"""
+
+    # ── S5: UNSUPPORTED ────────────────────────────────────────
+    unsp      = cov_sum.get('unsupported', {})
+    unsp_plat = unsp.get('by_platform', {})
+    unsp_prod = unsp.get('by_product_type', {})
+
+    s5 = f"""
+<section id="s5">
+  {_sh(5, "Unsupported Assets (Cannot be Managed)", GREY2)}
+  <p class="lead"><strong>{_fmt(unsupported)}</strong> assets cannot run the Falcon sensor (IoT devices, network infrastructure, unidentified endpoints). These represent known blind spots that require alternative security controls.</p>
+  <div class="two-col">
+    {_rank('By Platform', sorted(unsp_plat.items(),key=lambda x:-x[1])[:8], unsupported, GREY3) if unsp_plat else ''}
+    {_rank('By Product Type', sorted(unsp_prod.items(),key=lambda x:-x[1])[:8], unsupported, GREY3) if unsp_prod else ''}
+  </div>
+</section>
+<div class="pb"></div>"""
+
+    # ── S6: RECOMMENDATIONS ────────────────────────────────────
+    recs = _recommendations(coverage, unmanaged, unsupported, managed, by_stat, gap_by_plat, k8s_total)
+    s6 = f"""
+<section id="s6">
+  {_sh(6, "Recommendations", RED)}
+  <div class="recs">{''.join(_rec(p,t,b) for p,t,b in recs)}</div>
+</section>
+<div class="pb"></div>"""
+
+    # ── S7: APPENDIX ───────────────────────────────────────────
+    IS_CLOUD = {'AWS_EC2_V2','AWS_EC2','AWS_EKS_FARGATE','AWS_ECS_FARGATE',
+                'AZURE','AZURE_CONTAINER_APPS','GCP'}
+    unmanaged_records = gaps.get('unmanaged', [])
+
+    def _sort_key(r):
+        return (0 if r.get('hostname') else 1,
+                r.get('platform_name') or 'ZZZ',
+                r.get('last_seen_timestamp') or '')
+
+    rows_html = ''
+    for i, r in enumerate(sorted(unmanaged_records, key=_sort_key)):
+        _raw_id    = r.get('id', '')
+        _cid       = r.get('cid', '')
+        _id_suffix = _raw_id.replace(_cid + '_', '', 1) if _raw_id.startswith(_cid + '_') else _raw_id
+        _disc_host = r.get('last_discoverer_hostname') or (r.get('discoverer_hostnames') or [None])[0]
+        hostname   = (r.get('hostname')
+                      or (_disc_host and f'<em title="Discovered by {_disc_host}" class="mono">{_disc_host}</em>')
+                      or f'<em class="mono">{_id_suffix[:20]}…</em>')
+        platform   = r.get('platform_name') or '—'
+        os_ver     = (r.get('os_version') or '—')[:32]
+        ip         = r.get('current_local_ip') or (r.get('local_ip_addresses') or [''])[0] or '—'
+        provider   = r.get('cloud_provider') or '—'
+        confidence = r.get('confidence', '')
+        hint       = _container_hint(r)
+        is_cloud   = (r.get('cloud_provider') or '') in IS_CLOUD
+        hint_color = CYAN if hint == 'likely' else (GREY3 if hint == 'possible' else GREY5)
+        row_cls    = ('cloud-row' if is_cloud else '') + (' alt' if i % 2 else '')
+        rows_html += (
+            f'<tr class="{row_cls.strip()}">'
+            f'<td>{hostname}</td>'
+            f'<td style="text-align:center">{platform}</td>'
+            f'<td>{os_ver}</td>'
+            f'<td><span class="mono">{ip}</span></td>'
+            f'<td style="color:{"" + ORANGE if is_cloud else GREY3}">{provider}</td>'
+            f'<td style="text-align:center">{confidence}%' if confidence != '' else '<td style="text-align:center">—'
+            f'</td>'
+            f'<td style="text-align:center;color:{hint_color};font-weight:{"700" if hint=="likely" else "400"}">{hint}</td>'
+            f'</tr>'
+        )
+
+    s7 = f"""
+<section id="s7">
+  {_sh(7, f"Appendix — Unmanaged Asset List ({_fmt(unmanaged)} hosts)", ORANGE)}
+  <p class="note">
+    Assets capable of running the Falcon sensor with no sensor installed. &nbsp;
+    <span style="background:#FFF3E0;padding:1px 6px;border-radius:3px;color:{ORANGE}">Amber rows</span> = cloud-hosted. &nbsp;
+    <strong>Ctrs</strong>: <strong style="color:{CYAN}">likely</strong> = container OS/provider/hostname detected,
+    <strong>possible</strong> = Linux VM in cloud,
+    <strong>—</strong> = no signal. &nbsp;
+    <strong>Conf</strong> = discovery confidence %.
+  </p>
+  <div class="app-scroll">
+    <table class="dt app-table">
+      <thead><tr>
+        <th>Hostname / ID</th><th>Platform</th><th>OS Version</th>
+        <th>IP Address</th><th>Cloud Provider</th><th>Conf</th><th>Ctrs</th>
+      </tr></thead>
+      <tbody>{rows_html}</tbody>
+    </table>
+  </div>
+</section>"""
+
+    # ── ASSEMBLE ───────────────────────────────────────────────
+    nav = f"""
+<nav class="nav">
+  <div class="nav-brand">
+    <svg viewBox="0 0 40 46" width="18" height="21">
+      <polygon points="20,1 38,11 38,35 20,45 2,35 2,11" fill="{RED}"/>
+    </svg>
+    CrowdStrike Falcon
+  </div>
+  <div class="nav-links">
+    <a href="#s1">Coverage</a>
+    <a href="#s2">Managed Hosts</a>
+    <a href="#s3">Cloud &amp; K8s</a>
+    <a href="#s4">Containers</a>
+    <a href="#s5">Unsupported</a>
+    <a href="#s6">Recommendations</a>
+    <a href="#s7">Appendix</a>
+  </div>
+</nav>"""
+
+    footer = (
+        f'<footer>Data sourced from CrowdStrike Falcon API ({cloud_name}) &nbsp;·&nbsp; '
+        f'Generated {ts_display} &nbsp;·&nbsp; '
+        f'CONFIDENTIAL — authorized personnel only</footer>'
+    )
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CrowdStrike Falcon — Asset Inventory Report — {ts_display}</title>
+<style>{CSS}</style>
+</head>
+<body>
+{nav}
+{cover}
+{s1}
+{s2}
+{s3}
+{s4}
+{s5}
+{s6}
+{s7}
+{footer}
+</body>
+</html>"""
+
+    print("Building HTML…")
+    with open(out_path, 'w', encoding='utf-8') as fh:
+        fh.write(html)
+    size_kb = os.path.getsize(out_path) / 1024
+    print(f"✓ Report written to: {out_path}  ({size_kb:.0f} KB)")
+
+
+# ── ENTRY POINT ────────────────────────────────────────────────
+if __name__ == '__main__':
+    if len(sys.argv) >= 2:
+        json_path = sys.argv[1]
+    else:
+        matches = sorted(glob.glob('falcon_hosts_inventory_*.json'), reverse=True)
+        if not matches:
+            print("ERROR: no falcon_hosts_inventory_*.json found.")
+            print("Usage: python3 generate_report.py [inventory.json] [output.html]")
+            sys.exit(1)
+        json_path = matches[0]
+        print(f"Using most recent inventory: {json_path}")
+
+    if not os.path.exists(json_path):
+        print(f"ERROR: file not found: {json_path}")
+        sys.exit(1)
+
+    if len(sys.argv) >= 3:
+        out_path = sys.argv[2]
+    else:
+        base = os.path.splitext(os.path.basename(json_path))[0]
+        ts   = base.split('_')[-1]
+        out_path = f"falcon_asset_report_{ts}.html"
+
+    build_html(json_path, out_path)

@@ -1,0 +1,1814 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Falcon Asset Inventory</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:          #05070d;
+  --bg1:         #080b13;
+  --bg2:         #0d1120;
+  --bg3:         #131827;
+  --border:      rgba(0,212,255,0.12);
+  --border-hi:   rgba(0,212,255,0.30);
+  --red:         #e8001c;
+  --red-dim:     rgba(232,0,28,0.15);
+  --red-glow:    rgba(232,0,28,0.4);
+  --cyan:        #00d4ff;
+  --cyan-dim:    rgba(0,212,255,0.08);
+  --green:       #00e87c;
+  --green-dim:   rgba(0,232,124,0.12);
+  --orange:      #ff8800;
+  --orange-dim:  rgba(255,136,0,0.12);
+  --yellow:      #ffd500;
+  --txt:         #c8d8f0;
+  --txt2:        #6a7a99;
+  --txt3:        #3a4a66;
+  --mono:        'JetBrains Mono', monospace;
+  --display:     'Chakra Petch', sans-serif;
+  --radius:      2px;
+  --transition:  0.18s cubic-bezier(.4,0,.2,1);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+
+body {
+  background: var(--bg);
+  color: var(--txt);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+/* ── NOISE OVERLAY ────────────────────────────────────────── */
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 9999;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+  opacity: 0.35;
+}
+
+/* ── LOADING SCREEN ───────────────────────────────────────── */
+#loading-screen {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: var(--bg);
+  gap: 32px;
+  transition: opacity 0.4s ease;
+}
+#loading-screen.hidden { opacity: 0; pointer-events: none; }
+
+.load-logo {
+  display: flex; align-items: center; gap: 14px;
+}
+.load-logo .falcon-mark {
+  width: 48px; height: 48px;
+  background: var(--red);
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  animation: pulse-hex 2s ease-in-out infinite;
+}
+@keyframes pulse-hex {
+  0%, 100% { filter: drop-shadow(0 0 8px var(--red-glow)); }
+  50%       { filter: drop-shadow(0 0 20px var(--red-glow)); }
+}
+.load-logo h1 {
+  font-family: var(--display);
+  font-size: 28px; font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--txt);
+}
+.load-logo h1 span { color: var(--red); }
+
+.drop-zone {
+  border: 1px solid var(--border-hi);
+  background: var(--bg2);
+  width: 480px; max-width: 90vw;
+  padding: 48px 40px;
+  text-align: center;
+  cursor: pointer;
+  position: relative;
+  transition: border-color var(--transition), background var(--transition);
+  clip-path: polygon(12px 0%, 100% 0%, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0% 100%, 0% 12px);
+}
+.drop-zone::before {
+  content: '';
+  position: absolute; inset: -1px;
+  background: linear-gradient(135deg, var(--cyan) 0%, transparent 40%, transparent 60%, var(--red) 100%);
+  clip-path: polygon(12px 0%, 100% 0%, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0% 100%, 0% 12px);
+  z-index: -1;
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+.drop-zone:hover, .drop-zone.dragover {
+  border-color: var(--cyan);
+  background: rgba(0,212,255,0.05);
+}
+.drop-zone:hover::before, .drop-zone.dragover::before { opacity: 1; }
+.drop-zone svg { color: var(--cyan); margin-bottom: 16px; opacity: 0.7; }
+.drop-zone h2 {
+  font-family: var(--display);
+  font-size: 16px; font-weight: 600;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+}
+.drop-zone p { color: var(--txt2); font-size: 12px; line-height: 1.8; }
+.drop-zone p strong { color: var(--cyan); font-weight: 500; }
+#file-input { display: none; }
+
+.load-progress {
+  width: 480px; max-width: 90vw;
+  display: none;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+}
+.load-progress.visible { display: flex; }
+.load-progress p {
+  font-family: var(--display);
+  font-size: 13px;
+  color: var(--txt2);
+  letter-spacing: 0.06em;
+}
+.progress-bar {
+  width: 100%;
+  height: 2px;
+  background: var(--bg3);
+  overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--red), var(--cyan));
+  width: 0%;
+  transition: width 0.3s ease;
+  box-shadow: 0 0 8px var(--cyan);
+}
+.progress-bar-fill.indeterminate {
+  width: 40%;
+  animation: indeterminate 1.2s ease-in-out infinite;
+}
+@keyframes indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+/* ── MAIN APP ─────────────────────────────────────────────── */
+#app {
+  display: none;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+#app.visible { display: flex; }
+
+/* ── TOPBAR ───────────────────────────────────────────────── */
+#topbar {
+  height: 52px;
+  background: var(--bg1);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  gap: 20px;
+  flex-shrink: 0;
+  position: relative;
+}
+#topbar::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, var(--red), transparent 30%, transparent 70%, var(--cyan));
+}
+.brand {
+  display: flex; align-items: center; gap: 10px;
+  flex-shrink: 0;
+}
+.brand-hex {
+  width: 24px; height: 24px;
+  background: var(--red);
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  flex-shrink: 0;
+}
+.brand-text {
+  font-family: var(--display);
+  font-size: 14px; font-weight: 700;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+.brand-text span { color: var(--red); }
+
+.topbar-divider {
+  width: 1px; height: 28px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+#meta-info {
+  display: flex; align-items: center; gap: 16px;
+  font-size: 11px; color: var(--txt2);
+  flex-shrink: 0;
+}
+#meta-info span { display: flex; align-items: center; gap: 5px; }
+#meta-info .dot {
+  width: 6px; height: 6px;
+  background: var(--green);
+  border-radius: 50%;
+  box-shadow: 0 0 6px var(--green);
+  animation: blink 2s ease-in-out infinite;
+}
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+#search-wrap {
+  flex: 1;
+  position: relative;
+  max-width: 560px;
+}
+#search-wrap svg {
+  position: absolute; left: 12px; top: 50%;
+  transform: translateY(-50%);
+  color: var(--txt3); pointer-events: none;
+}
+#global-search {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--txt);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 7px 14px 7px 36px;
+  outline: none;
+  transition: border-color var(--transition);
+  border-radius: var(--radius);
+}
+#global-search::placeholder { color: var(--txt3); }
+#global-search:focus {
+  border-color: var(--cyan);
+  background: rgba(0,212,255,0.04);
+  box-shadow: 0 0 0 1px rgba(0,212,255,0.12);
+}
+
+.kbd {
+  position: absolute; right: 10px; top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px; color: var(--txt3);
+  background: var(--bg2); border: 1px solid var(--txt3);
+  padding: 1px 5px; border-radius: 2px;
+  pointer-events: none;
+}
+
+#load-new-btn {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--txt2);
+  font-family: var(--display);
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: all var(--transition);
+  border-radius: var(--radius);
+  display: flex; align-items: center; gap: 6px;
+  white-space: nowrap;
+}
+#load-new-btn:hover {
+  border-color: var(--cyan);
+  color: var(--cyan);
+  background: var(--cyan-dim);
+}
+
+/* ── STATS BANNER ─────────────────────────────────────────── */
+#stats-banner {
+  background: var(--bg1);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+#stats-banner::-webkit-scrollbar { height: 2px; background: var(--bg); }
+#stats-banner::-webkit-scrollbar-thumb { background: var(--border-hi); }
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 12px 24px;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  transition: background var(--transition);
+  flex-shrink: 0;
+  min-width: 130px;
+}
+.stat-card:hover { background: var(--cyan-dim); }
+.stat-card.active { background: rgba(0,212,255,0.06); }
+.stat-card:last-child { border-right: none; }
+
+.stat-label {
+  font-family: var(--display);
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--txt2);
+  margin-bottom: 4px;
+}
+.stat-value {
+  font-size: 22px; font-weight: 700;
+  line-height: 1.1;
+}
+.stat-value.red    { color: var(--red); }
+.stat-value.cyan   { color: var(--cyan); }
+.stat-value.green  { color: var(--green); }
+.stat-value.orange { color: var(--orange); }
+.stat-value.yellow { color: var(--yellow); }
+.stat-sub {
+  font-size: 10px; color: var(--txt2); margin-top: 2px;
+}
+
+/* Coverage gauge */
+.coverage-card {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 10px 28px;
+  flex-shrink: 0;
+  min-width: 220px;
+}
+.gauge-wrap { position: relative; width: 60px; height: 60px; flex-shrink: 0; }
+.gauge-wrap svg { transform: rotate(-90deg); }
+.gauge-bg { stroke: var(--bg3); fill: none; }
+.gauge-fill { fill: none; stroke-linecap: round; transition: stroke-dashoffset 1s ease; }
+.gauge-pct {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700;
+  font-family: var(--display);
+}
+.gauge-info { flex: 1; }
+.gauge-info .g-label {
+  font-family: var(--display);
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--txt2);
+  margin-bottom: 6px;
+}
+.gauge-info .g-row {
+  display: flex; justify-content: space-between;
+  font-size: 11px; margin-bottom: 2px;
+}
+.gauge-info .g-row span:first-child { color: var(--txt2); }
+.gauge-info .g-row span:last-child  { font-weight: 600; }
+
+/* ── SECTION TABS ─────────────────────────────────────────── */
+#section-tabs {
+  background: var(--bg1);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  padding: 0 20px;
+  gap: 2px;
+  overflow-x: auto;
+}
+#section-tabs::-webkit-scrollbar { display: none; }
+
+.tab {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 18px;
+  font-family: var(--display);
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--txt2);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all var(--transition);
+  white-space: nowrap;
+  user-select: none;
+}
+.tab:hover { color: var(--txt); }
+.tab.active { color: var(--cyan); border-bottom-color: var(--cyan); }
+.tab.gap-tab.active { color: var(--orange); border-bottom-color: var(--orange); }
+.tab-badge {
+  background: var(--bg3);
+  color: var(--txt2);
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  min-width: 24px;
+  text-align: center;
+  transition: all var(--transition);
+}
+.tab.active .tab-badge  { background: rgba(0,212,255,0.15); color: var(--cyan); }
+.tab.gap-tab.active .tab-badge { background: rgba(255,136,0,0.15); color: var(--orange); }
+
+/* ── FILTER BAR ───────────────────────────────────────────── */
+#filter-bar {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 20px;
+  flex-shrink: 0;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  min-height: 44px;
+}
+#filter-bar::-webkit-scrollbar { display: none; }
+
+.filter-label {
+  font-family: var(--display);
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--txt3);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.filter-chip {
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--txt2);
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: var(--radius);
+  transition: all var(--transition);
+  white-space: nowrap;
+  flex-shrink: 0;
+  user-select: none;
+}
+.filter-chip:hover { border-color: var(--border-hi); color: var(--txt); }
+.filter-chip.active {
+  border-color: var(--cyan);
+  color: var(--cyan);
+  background: var(--cyan-dim);
+}
+.filter-chip.active-red {
+  border-color: var(--red);
+  color: var(--red);
+  background: var(--red-dim);
+}
+.filter-chip.active-orange {
+  border-color: var(--orange);
+  color: var(--orange);
+  background: var(--orange-dim);
+}
+.filter-chip.active-green {
+  border-color: var(--green);
+  color: var(--green);
+  background: var(--green-dim);
+}
+.chip-sep {
+  height: 20px; width: 1px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+.filter-clear {
+  margin-left: auto;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--txt3);
+  font-family: var(--display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  padding: 4px 8px;
+  transition: color var(--transition);
+  white-space: nowrap;
+}
+.filter-clear:hover { color: var(--red); }
+
+/* ── RESULTS HEADER ───────────────────────────────────────── */
+#results-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--bg);
+  min-height: 34px;
+}
+#results-count {
+  font-size: 11px; color: var(--txt2);
+  font-family: var(--display);
+  letter-spacing: 0.05em;
+}
+#results-count strong { color: var(--cyan); font-weight: 600; }
+
+#export-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--txt2);
+  font-family: var(--display);
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: all var(--transition);
+  border-radius: var(--radius);
+  display: flex; align-items: center; gap: 5px;
+}
+#export-btn:hover { border-color: var(--green); color: var(--green); background: var(--green-dim); }
+
+/* ── TABLE AREA ───────────────────────────────────────────── */
+#table-wrap {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+#table-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+#table-scroll::-webkit-scrollbar { width: 4px; height: 4px; background: var(--bg); }
+#table-scroll::-webkit-scrollbar-thumb { background: var(--bg3); border-radius: 2px; }
+#table-scroll::-webkit-scrollbar-thumb:hover { background: var(--border-hi); }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+thead th {
+  position: sticky; top: 0; z-index: 10;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  padding: 9px 14px;
+  text-align: left;
+  font-family: var(--display);
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--txt2);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  transition: color var(--transition);
+}
+thead th:hover { color: var(--cyan); }
+thead th.sorted { color: var(--cyan); }
+thead th.sorted::after { content: ' ↑'; }
+thead th.sorted.desc::after { content: ' ↓'; }
+
+tbody tr {
+  border-bottom: 1px solid rgba(0,0,0,0.4);
+  transition: background var(--transition);
+  cursor: pointer;
+}
+tbody tr:hover  { background: rgba(0,212,255,0.04); }
+tbody tr.active { background: rgba(0,212,255,0.08); }
+tbody tr:nth-child(even) { background: rgba(255,255,255,0.015); }
+tbody tr:nth-child(even):hover { background: rgba(0,212,255,0.04); }
+
+td {
+  padding: 7px 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+td.hostname { font-weight: 500; color: var(--txt); max-width: 220px; }
+td.ip       { color: var(--cyan); opacity: 0.85; }
+td.mono-dim { color: var(--txt2); }
+
+.badge {
+  display: inline-flex; align-items: center;
+  padding: 2px 8px;
+  font-family: var(--display);
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.05em;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+.badge-green  { background: var(--green-dim);  color: var(--green);  border: 1px solid rgba(0,232,124,0.3); }
+.badge-red    { background: var(--red-dim);    color: #ff4455;       border: 1px solid rgba(232,0,28,0.3);  }
+.badge-orange { background: var(--orange-dim); color: var(--orange); border: 1px solid rgba(255,136,0,0.3); }
+.badge-cyan   { background: var(--cyan-dim);   color: var(--cyan);   border: 1px solid rgba(0,212,255,0.3); }
+.badge-grey   { background: var(--bg3);        color: var(--txt2);   border: 1px solid var(--border); }
+.badge-yellow { background: rgba(255,213,0,0.1); color: var(--yellow); border: 1px solid rgba(255,213,0,0.3); }
+
+.empty-state {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 80px 20px;
+  color: var(--txt3);
+  gap: 12px;
+}
+.empty-state svg { opacity: 0.3; }
+.empty-state p { font-family: var(--display); font-size: 13px; letter-spacing: 0.05em; }
+
+/* ── PAGINATION ───────────────────────────────────────────── */
+#pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--bg1);
+  flex-shrink: 0;
+  min-height: 42px;
+}
+.page-info {
+  font-size: 11px; color: var(--txt2);
+  font-family: var(--display); letter-spacing: 0.05em;
+}
+.page-info strong { color: var(--txt); font-weight: 600; }
+.page-btns { display: flex; gap: 4px; align-items: center; }
+.page-btn {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--txt2);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: all var(--transition);
+  border-radius: var(--radius);
+}
+.page-btn:hover:not(:disabled) { border-color: var(--cyan); color: var(--cyan); background: var(--cyan-dim); }
+.page-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.page-btn.current {
+  border-color: var(--cyan);
+  color: var(--cyan);
+  background: var(--cyan-dim);
+  pointer-events: none;
+}
+.page-btn.ellipsis { border: none; background: none; pointer-events: none; }
+
+/* ── DETAIL PANEL ─────────────────────────────────────────── */
+#detail-panel {
+  position: fixed;
+  right: 0; top: 0; bottom: 0;
+  width: 480px; max-width: 95vw;
+  background: var(--bg1);
+  border-left: 1px solid var(--border);
+  z-index: 500;
+  display: flex; flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.25s cubic-bezier(.4,0,.2,1);
+  box-shadow: -20px 0 60px rgba(0,0,0,0.6);
+}
+#detail-panel.open { transform: translateX(0); }
+
+#detail-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+}
+#detail-header h2 {
+  font-family: var(--display);
+  font-size: 16px; font-weight: 700;
+  color: var(--txt);
+  word-break: break-all;
+  line-height: 1.3;
+}
+#detail-header .dtag { font-size: 11px; color: var(--txt2); margin-top: 3px; }
+
+#detail-close {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--txt2);
+  font-size: 16px; line-height: 1;
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: all var(--transition);
+}
+#detail-close:hover { border-color: var(--red); color: var(--red); }
+
+#detail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+#detail-body::-webkit-scrollbar { width: 3px; background: var(--bg); }
+#detail-body::-webkit-scrollbar-thumb { background: var(--bg3); }
+
+.detail-section-title {
+  font-family: var(--display);
+  font-size: 9px; font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--txt3);
+  margin: 16px 0 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.detail-section-title:first-child { border-top: none; padding-top: 0; margin-top: 0; }
+
+.detail-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 5px;
+  line-height: 1.5;
+}
+.detail-key {
+  font-size: 11px; color: var(--txt3);
+  min-width: 150px; max-width: 150px;
+  flex-shrink: 0;
+  text-align: right;
+  font-weight: 400;
+  padding-top: 0;
+}
+.detail-val {
+  font-size: 12px; color: var(--txt);
+  word-break: break-all;
+  flex: 1;
+}
+.detail-val.highlight { color: var(--cyan); }
+.detail-val.dim { color: var(--txt2); }
+
+/* ── OVERLAY ──────────────────────────────────────────────── */
+#overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 499;
+  opacity: 0; pointer-events: none;
+  transition: opacity var(--transition);
+}
+#overlay.visible { opacity: 1; pointer-events: all; }
+
+/* ── SCROLLBAR (global) ───────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--bg3); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-hi); }
+</style>
+</head>
+<body>
+
+<!-- LOADING SCREEN -->
+<div id="loading-screen">
+  <div class="load-logo">
+    <div class="falcon-mark"></div>
+    <h1>FALCON <span>ASSET</span> VIEWER</h1>
+  </div>
+
+  <div class="drop-zone" id="drop-zone">
+    <input type="file" id="file-input" accept=".json">
+    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+      <polyline points="14 2 14 8 20 8"/>
+      <line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>
+    </svg>
+    <h2>LOAD INVENTORY JSON</h2>
+    <p>
+      Drop a <strong>falcon_hosts_inventory_*.json</strong> file here<br>
+      or click to browse.<br><br>
+      The file is processed entirely in your browser — nothing is uploaded.
+    </p>
+  </div>
+
+  <div class="load-progress" id="load-progress">
+    <p id="load-status">Parsing inventory…</p>
+    <div class="progress-bar"><div class="progress-bar-fill indeterminate" id="progress-fill"></div></div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app">
+  <!-- TOPBAR -->
+  <div id="topbar">
+    <div class="brand">
+      <div class="brand-hex"></div>
+      <span class="brand-text">FALCON <span>ASSET</span> VIEWER</span>
+    </div>
+    <div class="topbar-divider"></div>
+    <div id="meta-info">
+      <span><div class="dot"></div><span id="meta-cloud">us-1</span></span>
+      <span>GEN: <span id="meta-ts">—</span></span>
+    </div>
+    <div class="topbar-divider"></div>
+    <div id="search-wrap">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      <input type="text" id="global-search" placeholder="Search hostname, IP, OS, account…" autocomplete="off" spellcheck="false">
+      <span class="kbd">/</span>
+    </div>
+    <button id="load-new-btn" onclick="reloadApp()">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+      </svg>
+      LOAD NEW
+    </button>
+  </div>
+
+  <!-- STATS BANNER -->
+  <div id="stats-banner">
+    <div class="stat-card" onclick="switchTab('hosts')" title="Managed hosts with Falcon sensor installed">
+      <div class="stat-label">Managed Hosts</div>
+      <div class="stat-value green" id="stat-managed">—</div>
+      <div class="stat-sub" id="stat-managed-sub">with sensor</div>
+    </div>
+    <div class="stat-card" onclick="switchTab('cloud')" title="Managed hosts running in cloud environments">
+      <div class="stat-label">Cloud Hosts</div>
+      <div class="stat-value cyan" id="stat-cloud">—</div>
+      <div class="stat-sub" id="stat-cloud-sub">AWS / Azure / GCP</div>
+    </div>
+    <div class="stat-card" onclick="switchTab('kubernetes')" title="Kubernetes pods with Falcon sensor">
+      <div class="stat-label">Kubernetes</div>
+      <div class="stat-value cyan" id="stat-k8s">—</div>
+      <div class="stat-sub">pods instrumented</div>
+    </div>
+    <div class="stat-card" onclick="switchTab('discover')" title="All assets discovered across the environment">
+      <div class="stat-label">Discovered</div>
+      <div class="stat-value" id="stat-discover">—</div>
+      <div class="stat-sub">total assets seen</div>
+    </div>
+    <div class="stat-card" onclick="switchTab('gaps')" title="Assets that could support Falcon but don't have it installed">
+      <div class="stat-label">Sensor Gap</div>
+      <div class="stat-value orange" id="stat-gap">—</div>
+      <div class="stat-sub">unmanaged assets</div>
+    </div>
+    <div class="stat-card" title="Assets that cannot support Falcon (IoT, network gear, etc.)">
+      <div class="stat-label">Unsupported</div>
+      <div class="stat-value red" id="stat-unsupported">—</div>
+      <div class="stat-sub">cannot be managed</div>
+    </div>
+    <div class="coverage-card">
+      <div class="gauge-wrap">
+        <svg width="60" height="60" viewBox="0 0 60 60">
+          <circle class="gauge-bg" cx="30" cy="30" r="24" stroke-width="5"/>
+          <circle class="gauge-fill" id="gauge-fill" cx="30" cy="30" r="24" stroke-width="5"
+                  stroke-dasharray="150.796" stroke-dashoffset="150.796"/>
+        </svg>
+        <div class="gauge-pct" id="gauge-pct">—</div>
+      </div>
+      <div class="gauge-info">
+        <div class="g-label">Sensor Coverage</div>
+        <div class="g-row"><span>Managed</span><span id="g-managed">—</span></div>
+        <div class="g-row"><span>Sensor-Eligible</span><span id="g-manageable">—</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TABS -->
+  <div id="section-tabs">
+    <div class="tab active" data-tab="hosts" onclick="switchTab('hosts')">
+      Managed Hosts <span class="tab-badge" id="tbadge-hosts">0</span>
+    </div>
+    <div class="tab" data-tab="cloud" onclick="switchTab('cloud')">
+      Cloud <span class="tab-badge" id="tbadge-cloud">0</span>
+    </div>
+    <div class="tab" data-tab="kubernetes" onclick="switchTab('kubernetes')">
+      Kubernetes <span class="tab-badge" id="tbadge-kubernetes">0</span>
+    </div>
+    <div class="tab" data-tab="discover" onclick="switchTab('discover')">
+      Discover <span class="tab-badge" id="tbadge-discover">0</span>
+    </div>
+    <div class="tab gap-tab" data-tab="gaps" onclick="switchTab('gaps')">
+      Coverage Gaps <span class="tab-badge" id="tbadge-gaps">0</span>
+    </div>
+    <div class="tab" data-tab="hidden" onclick="switchTab('hidden')">
+      Hidden <span class="tab-badge" id="tbadge-hidden">0</span>
+    </div>
+  </div>
+
+  <!-- FILTER BAR -->
+  <div id="filter-bar">
+    <!-- filled dynamically -->
+  </div>
+
+  <!-- RESULTS HEADER -->
+  <div id="results-header">
+    <div id="results-count">Loading…</div>
+    <button id="export-btn" onclick="exportCSV()">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>
+      EXPORT CSV
+    </button>
+  </div>
+
+  <!-- TABLE -->
+  <div id="table-wrap">
+    <div id="table-scroll">
+      <table id="main-table">
+        <thead id="table-head"></thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
+    <div id="pagination"></div>
+  </div>
+</div>
+
+<!-- DETAIL PANEL -->
+<div id="overlay" onclick="closeDetail()"></div>
+<div id="detail-panel">
+  <div id="detail-header">
+    <div>
+      <h2 id="detail-title">—</h2>
+      <div class="dtag" id="detail-tag">—</div>
+    </div>
+    <button id="detail-close" onclick="closeDetail()">✕</button>
+  </div>
+  <div id="detail-body"></div>
+</div>
+
+<script>
+// ──────────────────────────────────────────────────────────────
+//  STATE
+// ──────────────────────────────────────────────────────────────
+const S = {
+  raw: null,
+  tab: 'hosts',
+  search: '',
+  filters: {},
+  sortCol: null,
+  sortDir: 1,
+  page: 0,
+  pageSize: 50,
+  activeRow: null,
+};
+
+const indexes = {};   // tab -> flat row array
+const summaries = {}; // tab -> summary object
+let onlineMap = {};   // device_id -> state string
+
+// ──────────────────────────────────────────────────────────────
+//  FILE LOADING
+// ──────────────────────────────────────────────────────────────
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => e.target.files[0] && loadFile(e.target.files[0]));
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  e.dataTransfer.files[0] && loadFile(e.dataTransfer.files[0]);
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === '/' && document.getElementById('app').classList.contains('visible')) {
+    e.preventDefault();
+    document.getElementById('global-search').focus();
+  }
+  if (e.key === 'Escape') closeDetail();
+});
+
+function setLoadStatus(msg) {
+  document.getElementById('load-status').textContent = msg;
+}
+
+function loadFile(file) {
+  const prog = document.getElementById('load-progress');
+  prog.classList.add('visible');
+  dropZone.style.display = 'none';
+  setLoadStatus(`Reading ${file.name} (${(file.size/1024/1024).toFixed(1)} MB)…`);
+
+  const reader = new FileReader();
+  reader.onprogress = e => {
+    if (e.lengthComputable) {
+      const pct = (e.loaded / e.total * 60).toFixed(0);
+      const fill = document.getElementById('progress-fill');
+      fill.classList.remove('indeterminate');
+      fill.style.width = pct + '%';
+    }
+  };
+  reader.onload = e => {
+    setLoadStatus('Parsing JSON…');
+    setTimeout(() => {
+      try {
+        const json = JSON.parse(e.target.result);
+        setLoadStatus('Building indexes…');
+        setTimeout(() => {
+          processData(json);
+          document.getElementById('loading-screen').classList.add('hidden');
+          document.getElementById('app').classList.add('visible');
+          setTimeout(() => document.getElementById('loading-screen').style.display = 'none', 400);
+        }, 50);
+      } catch(err) {
+        setLoadStatus('Error parsing file: ' + err.message);
+      }
+    }, 30);
+  };
+  reader.readAsText(file);
+}
+
+function reloadApp() {
+  document.getElementById('loading-screen').style.display = '';
+  document.getElementById('loading-screen').classList.remove('hidden');
+  document.getElementById('app').classList.remove('visible');
+  document.getElementById('load-progress').classList.remove('visible');
+  dropZone.style.display = '';
+  fileInput.value = '';
+}
+
+// ──────────────────────────────────────────────────────────────
+//  DATA PROCESSING
+// ──────────────────────────────────────────────────────────────
+function processData(json) {
+  S.raw = json;
+
+  // Build online state map
+  onlineMap = {};
+  (json.online_state || []).forEach(r => { onlineMap[r.id] = r.state; });
+
+  // Summaries
+  summaries.host      = json.host_summary || {};
+  summaries.cloud     = json.cloud_summary || {};
+  summaries.kubernetes = json.kubernetes_summary || {};
+  summaries.coverage  = json.coverage_summary || {};
+  summaries.meta      = json._meta || {};
+
+  // Build indexes
+  indexes.hosts      = buildManagedIndex(json.hosts || []);
+  indexes.cloud      = buildManagedIndex(json.cloud_hosts || []);
+  indexes.kubernetes = buildK8sIndex(json.kubernetes_hosts || []);
+  indexes.discover   = buildDiscoverIndex(json.discover_hosts || []);
+  indexes.gaps       = buildGapIndex(
+    (json.coverage_gaps?.unmanaged || []).concat(json.coverage_gaps?.unsupported || [])
+  );
+  indexes.hidden     = buildManagedIndex(json.hidden_hosts || []);
+
+  // Meta bar
+  const m = summaries.meta;
+  document.getElementById('meta-cloud').textContent = m.cloud || 'us-1';
+  document.getElementById('meta-ts').textContent = formatTs(m.generated_at) || '—';
+
+  // Stats
+  const cs = summaries.coverage;
+  setStatCard('managed',    cs.managed_count,   `${summaries.host.by_platform ? Object.keys(summaries.host.by_platform).length : 0} platforms`);
+  setStatCard('cloud',      summaries.cloud.total, 'AWS / Azure / GCP');
+  setStatCard('k8s',        summaries.kubernetes.total, 'pods instrumented');
+  setStatCard('discover',   indexes.discover.length, 'total assets seen');
+  setStatCard('gap',        cs.unmanaged_count, `${cs.manageable_total?.toLocaleString()} sensor-eligible`);
+  setStatCard('unsupported', cs.unsupported_count, 'cannot be managed');
+
+  // Coverage gauge
+  const pct = cs.sensor_coverage_pct || 0;
+  const circumference = 150.796;
+  const offset = circumference - (pct / 100) * circumference;
+  const fill = document.getElementById('gauge-fill');
+  fill.style.strokeDashoffset = circumference; // reset
+  const color = pct >= 70 ? '#00e87c' : pct >= 40 ? '#ffd500' : '#e8001c';
+  fill.style.stroke = color;
+  document.getElementById('gauge-pct').style.color = color;
+  document.getElementById('gauge-pct').textContent = pct.toFixed(0) + '%';
+  document.getElementById('g-managed').textContent = cs.managed_count?.toLocaleString() || '—';
+  document.getElementById('g-manageable').textContent = cs.manageable_total?.toLocaleString() || '—';
+  setTimeout(() => { fill.style.strokeDashoffset = offset; }, 200);
+
+  // Tab badges
+  setBadge('hosts',      indexes.hosts.length);
+  setBadge('cloud',      indexes.cloud.length);
+  setBadge('kubernetes', indexes.kubernetes.length);
+  setBadge('discover',   indexes.discover.length);
+  setBadge('gaps',       indexes.gaps.length);
+  setBadge('hidden',     indexes.hidden.length);
+
+  // Render
+  switchTab('hosts');
+}
+
+function setStatCard(id, val, sub) {
+  const el = document.getElementById('stat-' + id);
+  if (el) el.textContent = (val ?? '—').toLocaleString ? (val ?? 0).toLocaleString() : val;
+  const sub_el = document.getElementById('stat-' + id + '-sub');
+  if (sub_el && sub) sub_el.textContent = sub;
+}
+
+function setBadge(tab, count) {
+  const el = document.getElementById('tbadge-' + tab);
+  if (el) el.textContent = count.toLocaleString();
+}
+
+// ──────────────────────────────────────────────────────────────
+//  INDEX BUILDERS
+// ──────────────────────────────────────────────────────────────
+function buildManagedIndex(arr) {
+  return arr.map(h => ({
+    _raw: h,
+    id:           h.device_id || '',
+    hostname:     h.hostname  || '',
+    platform:     h.platform_name || '',
+    os:           h.os_version || '',
+    ip:           h.local_ip || (h.local_ip_addresses?.[0]) || '',
+    external_ip:  h.external_ip || '',
+    provider:     h.service_provider || 'on-prem',
+    account:      h.service_provider_account_id || '',
+    zone:         h.zone_group || '',
+    status:       h.status || (h.host_hidden_status === 'hidden' ? 'hidden' : 'normal'),
+    sensor:       h.agent_version || '',
+    last_seen:    h.last_seen || '',
+    first_seen:   h.first_seen || '',
+    product_type: h.product_type_desc || '',
+    criticality:  h.criticality || '',
+    online:       onlineMap[h.device_id] || '',
+    _search:      [h.hostname, h.local_ip, h.external_ip, h.os_version,
+                   h.service_provider, h.service_provider_account_id,
+                   h.agent_version, h.device_id, h.zone_group]
+                   .filter(Boolean).join(' ').toLowerCase(),
+  }));
+}
+
+function buildK8sIndex(arr) {
+  return arr.map(h => ({
+    _raw: h,
+    id:           h.device_id || '',
+    hostname:     h.hostname || '',
+    platform:     h.platform_name || '',
+    os:           h.os_version || '',
+    ip:           h.local_ip || '',
+    namespace:    h.pod_namespace || '',
+    pod_name:     h.pod_name || '',
+    provider:     h.service_provider || '',
+    account:      h.service_provider_account_id || '',
+    service_acct: h.pod_service_account_name || '',
+    sensor:       h.agent_version || '',
+    last_seen:    h.last_seen || '',
+    _search:      [h.hostname, h.pod_namespace, h.pod_name, h.local_ip,
+                   h.service_provider, h.pod_service_account_name, h.device_id]
+                   .filter(Boolean).join(' ').toLowerCase(),
+  }));
+}
+
+function buildDiscoverIndex(arr) {
+  return arr.map(h => {
+    const ips = (h.network_interfaces || []).map(n => n.local_ip).join(', ');
+    return {
+      _raw: h,
+      id:           h.id || '',
+      hostname:     h.hostname || '',
+      entity_type:  h.entity_type || '',
+      platform:     h.platform_name || '',
+      os:           h.os_version || '',
+      ip:           h.current_local_ip || ips || '',
+      external_ip:  h.external_ip || '',
+      country:      h.country || '',
+      city:         h.city || '',
+      product_type: h.product_type_desc || '',
+      confidence:   h.confidence ?? '',
+      last_seen:    h.last_seen_timestamp || '',
+      aid:          h.aid || '',
+      _search:      [h.hostname, h.current_local_ip, ips, h.platform_name,
+                     h.os_version, h.entity_type, h.country, h.city, h.aid, h.id]
+                     .filter(Boolean).join(' ').toLowerCase(),
+    };
+  });
+}
+
+function buildGapIndex(arr) {
+  return arr.map(h => {
+    const ips = (h.network_interfaces || []).map(n => n.local_ip).join(', ');
+    return {
+      _raw: h,
+      id:           h.id || '',
+      hostname:     h.hostname || '',
+      entity_type:  h.entity_type || '',
+      platform:     h.platform_name || '',
+      os:           h.os_version || '',
+      ip:           h.current_local_ip || ips || '',
+      product_type: h.product_type_desc || '',
+      confidence:   h.confidence ?? '',
+      triage:       h.triage_action || 'none',
+      discoverer:   (h.discoverer_product_type_descs || [])[0] || '',
+      last_seen:    h.last_seen_timestamp || '',
+      _search:      [h.hostname, h.current_local_ip, ips, h.platform_name,
+                     h.os_version, h.entity_type, h.triage_action, h.id]
+                     .filter(Boolean).join(' ').toLowerCase(),
+    };
+  });
+}
+
+// ──────────────────────────────────────────────────────────────
+//  TAB / FILTER SYSTEM
+// ──────────────────────────────────────────────────────────────
+const TAB_COLUMNS = {
+  hosts: [
+    {key:'hostname',    label:'Hostname',    w:'180px'},
+    {key:'ip',          label:'IP Address',  w:'130px', cls:'ip'},
+    {key:'platform',    label:'Platform',    w:'90px'},
+    {key:'os',          label:'OS',          w:'160px', cls:'mono-dim'},
+    {key:'provider',    label:'Provider',    w:'120px'},
+    {key:'product_type',label:'Type',        w:'120px', cls:'mono-dim'},
+    {key:'sensor',      label:'Sensor',      w:'130px', cls:'mono-dim'},
+    {key:'online',      label:'State',       w:'80px',  render:'online'},
+    {key:'last_seen',   label:'Last Seen',   w:'140px', cls:'mono-dim', render:'ts'},
+  ],
+  cloud: [
+    {key:'hostname',    label:'Hostname',    w:'180px'},
+    {key:'provider',    label:'Provider',    w:'130px', render:'provider'},
+    {key:'account',     label:'Account',     w:'150px', cls:'mono-dim'},
+    {key:'zone',        label:'Zone',        w:'200px', cls:'mono-dim'},
+    {key:'platform',    label:'Platform',    w:'90px'},
+    {key:'os',          label:'OS',          w:'160px', cls:'mono-dim'},
+    {key:'ip',          label:'IP',          w:'120px', cls:'ip'},
+    {key:'last_seen',   label:'Last Seen',   w:'140px', cls:'mono-dim', render:'ts'},
+  ],
+  kubernetes: [
+    {key:'hostname',    label:'Hostname',    w:'180px'},
+    {key:'namespace',   label:'Namespace',   w:'140px', cls:'ip'},
+    {key:'pod_name',    label:'Pod',         w:'180px', cls:'mono-dim'},
+    {key:'provider',    label:'Provider',    w:'130px', render:'provider'},
+    {key:'service_acct',label:'Svc Account', w:'130px', cls:'mono-dim'},
+    {key:'os',          label:'OS',          w:'160px', cls:'mono-dim'},
+    {key:'sensor',      label:'Sensor',      w:'130px', cls:'mono-dim'},
+    {key:'last_seen',   label:'Last Seen',   w:'140px', cls:'mono-dim', render:'ts'},
+  ],
+  discover: [
+    {key:'hostname',    label:'Hostname',    w:'180px'},
+    {key:'entity_type', label:'Type',        w:'100px', render:'entity_type'},
+    {key:'platform',    label:'Platform',    w:'90px'},
+    {key:'os',          label:'OS',          w:'160px', cls:'mono-dim'},
+    {key:'ip',          label:'IP',          w:'130px', cls:'ip'},
+    {key:'country',     label:'Country',     w:'100px', cls:'mono-dim'},
+    {key:'product_type',label:'Product',     w:'120px', cls:'mono-dim'},
+    {key:'confidence',  label:'Confidence',  w:'90px',  render:'confidence'},
+    {key:'last_seen',   label:'Last Seen',   w:'140px', cls:'mono-dim', render:'ts'},
+  ],
+  gaps: [
+    {key:'hostname',    label:'Hostname',    w:'180px'},
+    {key:'entity_type', label:'Type',        w:'100px', render:'entity_type'},
+    {key:'platform',    label:'Platform',    w:'90px'},
+    {key:'os',          label:'OS',          w:'160px', cls:'mono-dim'},
+    {key:'ip',          label:'IP',          w:'130px', cls:'ip'},
+    {key:'product_type',label:'Product',     w:'120px', cls:'mono-dim'},
+    {key:'triage',      label:'Triage',      w:'140px', render:'triage'},
+    {key:'confidence',  label:'Confidence',  w:'90px',  render:'confidence'},
+    {key:'last_seen',   label:'Last Seen',   w:'140px', cls:'mono-dim', render:'ts'},
+  ],
+  hidden: [
+    {key:'hostname',    label:'Hostname',    w:'180px'},
+    {key:'ip',          label:'IP Address',  w:'130px', cls:'ip'},
+    {key:'platform',    label:'Platform',    w:'90px'},
+    {key:'os',          label:'OS',          w:'160px', cls:'mono-dim'},
+    {key:'provider',    label:'Provider',    w:'120px'},
+    {key:'sensor',      label:'Sensor',      w:'130px', cls:'mono-dim'},
+    {key:'last_seen',   label:'Last Seen',   w:'140px', cls:'mono-dim', render:'ts'},
+  ],
+};
+
+const TAB_FILTERS = {
+  hosts: [
+    {label:'Platform', key:'platform',   values:['Linux','Windows','Mac','Android','iOS','K8S']},
+    {label:'Provider', key:'provider',   values:['on-prem','AWS_EC2_V2','AZURE','GCP','AWS_EKS_FARGATE','AWS_ECS_FARGATE','AZURE_CONTAINER_APPS']},
+    {label:'Status',   key:'status',     values:['normal','contained']},
+  ],
+  cloud: [
+    {label:'Provider', key:'provider',   values:['AWS_EC2_V2','AZURE','GCP','AWS_EKS_FARGATE','AWS_ECS_FARGATE','AZURE_CONTAINER_APPS']},
+    {label:'Platform', key:'platform',   values:['Linux','Windows','K8S']},
+  ],
+  kubernetes: [
+    {label:'Provider', key:'provider',   values:['AWS_EKS_FARGATE','AWS_EC2_V2','AZURE']},
+  ],
+  discover: [
+    {label:'Type',     key:'entity_type',values:['managed','unmanaged','unsupported']},
+    {label:'Platform', key:'platform',   values:['Linux','Windows','Unknown']},
+  ],
+  gaps: [
+    {label:'Type',     key:'entity_type',values:['unmanaged','unsupported']},
+    {label:'Platform', key:'platform',   values:['Linux','Windows','Unknown']},
+    {label:'Triage',   key:'triage',     values:['none','reviewed','install_sensor','pending_further_review','externally_managed']},
+  ],
+  hidden: [],
+};
+
+function switchTab(tab) {
+  S.tab = tab;
+  S.page = 0;
+  S.filters = {};
+  S.sortCol = null;
+  S.sortDir = 1;
+
+  document.querySelectorAll('.tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.tab === tab);
+  });
+
+  renderFilters();
+  renderTable();
+}
+
+function renderFilters() {
+  const bar = document.getElementById('filter-bar');
+  bar.innerHTML = '';
+
+  const defs = TAB_FILTERS[S.tab] || [];
+  if (!defs.length) {
+    bar.style.display = 'none';
+    return;
+  }
+  bar.style.display = 'flex';
+
+  defs.forEach((group, gi) => {
+    if (gi > 0) {
+      const sep = document.createElement('div');
+      sep.className = 'chip-sep';
+      bar.appendChild(sep);
+    }
+    const lbl = document.createElement('span');
+    lbl.className = 'filter-label';
+    lbl.textContent = group.label;
+    bar.appendChild(lbl);
+
+    group.values.forEach(val => {
+      const chip = document.createElement('button');
+      chip.className = 'filter-chip';
+      chip.textContent = val;
+      const isActive = (S.filters[group.key] || []).includes(val);
+      if (isActive) {
+        if (val === 'unmanaged' || val === 'contained') chip.classList.add('active-orange');
+        else if (val === 'unsupported') chip.classList.add('active-red');
+        else if (val === 'normal' || val === 'managed') chip.classList.add('active-green');
+        else chip.classList.add('active');
+      }
+      chip.addEventListener('click', () => {
+        const cur = S.filters[group.key] || [];
+        const idx = cur.indexOf(val);
+        if (idx === -1) S.filters[group.key] = [...cur, val];
+        else S.filters[group.key] = cur.filter(x => x !== val);
+        if (!S.filters[group.key].length) delete S.filters[group.key];
+        S.page = 0;
+        renderFilters();
+        renderTable();
+      });
+      bar.appendChild(chip);
+    });
+  });
+
+  if (Object.keys(S.filters).length) {
+    const clr = document.createElement('button');
+    clr.className = 'filter-clear';
+    clr.textContent = 'CLEAR FILTERS';
+    clr.addEventListener('click', () => {
+      S.filters = {};
+      S.page = 0;
+      renderFilters();
+      renderTable();
+    });
+    bar.appendChild(clr);
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+//  SEARCH + FILTER
+// ──────────────────────────────────────────────────────────────
+document.getElementById('global-search').addEventListener('input', e => {
+  S.search = e.target.value.toLowerCase().trim();
+  S.page = 0;
+  renderTable();
+});
+
+function getFilteredRows() {
+  let rows = indexes[S.tab] || [];
+
+  // text search
+  if (S.search) {
+    rows = rows.filter(r => r._search.includes(S.search));
+  }
+
+  // chip filters
+  Object.entries(S.filters).forEach(([key, vals]) => {
+    if (vals.length) rows = rows.filter(r => vals.includes(String(r[key])));
+  });
+
+  return rows;
+}
+
+// ──────────────────────────────────────────────────────────────
+//  SORT
+// ──────────────────────────────────────────────────────────────
+function sortRows(rows) {
+  if (!S.sortCol) return rows;
+  return [...rows].sort((a, b) => {
+    const av = (a[S.sortCol] || '');
+    const bv = (b[S.sortCol] || '');
+    return S.sortDir * (av < bv ? -1 : av > bv ? 1 : 0);
+  });
+}
+
+// ──────────────────────────────────────────────────────────────
+//  RENDER TABLE
+// ──────────────────────────────────────────────────────────────
+function renderTable() {
+  const allRows = sortRows(getFilteredRows());
+  const total   = allRows.length;
+  const pages   = Math.ceil(total / S.pageSize) || 1;
+  S.page = Math.min(S.page, pages - 1);
+  const slice   = allRows.slice(S.page * S.pageSize, (S.page + 1) * S.pageSize);
+  const cols    = TAB_COLUMNS[S.tab] || [];
+
+  // Thead
+  const thead = document.getElementById('table-head');
+  thead.innerHTML = '';
+  const tr = document.createElement('tr');
+  cols.forEach(col => {
+    const th = document.createElement('th');
+    th.textContent = col.label;
+    th.style.minWidth = col.w;
+    if (S.sortCol === col.key) {
+      th.classList.add('sorted');
+      if (S.sortDir === -1) th.classList.add('desc');
+    }
+    th.addEventListener('click', () => {
+      if (S.sortCol === col.key) S.sortDir *= -1;
+      else { S.sortCol = col.key; S.sortDir = 1; }
+      S.page = 0;
+      renderTable();
+    });
+    tr.appendChild(th);
+  });
+  thead.appendChild(tr);
+
+  // Tbody
+  const tbody = document.getElementById('table-body');
+  tbody.innerHTML = '';
+
+  if (!slice.length) {
+    const empty = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = cols.length;
+    td.innerHTML = `
+      <div class="empty-state">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <p>No results match your search or filters</p>
+      </div>`;
+    empty.appendChild(td);
+    tbody.appendChild(empty);
+  } else {
+    slice.forEach((row, i) => {
+      const tr = document.createElement('tr');
+      if (S.activeRow && S.activeRow.id === row.id) tr.classList.add('active');
+      tr.addEventListener('click', () => openDetail(row));
+
+      cols.forEach(col => {
+        const td = document.createElement('td');
+        const val = row[col.key];
+        td.title = val ?? '';
+
+        if (col.render) {
+          td.innerHTML = renderCell(col.render, val, row);
+        } else {
+          td.textContent = val || '—';
+        }
+
+        td.className = col.key === 'hostname' ? 'hostname' : (col.cls || '');
+        tr.appendChild(td);
+      });
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  // Results count
+  const base = indexes[S.tab]?.length || 0;
+  const countEl = document.getElementById('results-count');
+  if (total === base) {
+    countEl.innerHTML = `Showing <strong>${((S.page*S.pageSize)+1).toLocaleString()}–${Math.min((S.page+1)*S.pageSize, total).toLocaleString()}</strong> of <strong>${total.toLocaleString()}</strong> records`;
+  } else {
+    countEl.innerHTML = `<strong>${total.toLocaleString()}</strong> of ${base.toLocaleString()} records match — showing ${((S.page*S.pageSize)+1).toLocaleString()}–${Math.min((S.page+1)*S.pageSize, total).toLocaleString()}`;
+  }
+
+  // Pagination
+  renderPagination(total, pages);
+}
+
+function renderCell(type, val, row) {
+  switch(type) {
+    case 'ts': return val ? `<span title="${val}">${formatTs(val)}</span>` : '—';
+    case 'online':
+      if (!val) return '<span class="badge badge-grey">—</span>';
+      if (val === 'online')  return '<span class="badge badge-green">online</span>';
+      if (val === 'offline') return '<span class="badge badge-grey">offline</span>';
+      return `<span class="badge badge-grey">${val}</span>`;
+    case 'entity_type':
+      if (val === 'managed')    return '<span class="badge badge-green">managed</span>';
+      if (val === 'unmanaged')  return '<span class="badge badge-orange">unmanaged</span>';
+      if (val === 'unsupported') return '<span class="badge badge-red">unsupported</span>';
+      return `<span class="badge badge-grey">${val||'—'}</span>`;
+    case 'provider':
+      if (!val || val === 'on-prem') return '<span class="badge badge-grey">on-prem</span>';
+      if (val.startsWith('AWS')) return `<span class="badge badge-yellow">${val}</span>`;
+      if (val.startsWith('AZURE')) return `<span class="badge badge-cyan">${val}</span>`;
+      if (val.startsWith('GCP')) return `<span class="badge badge-green">${val}</span>`;
+      return `<span class="badge badge-grey">${val}</span>`;
+    case 'confidence':
+      if (val === '') return '—';
+      const pct = Number(val);
+      const cls = pct >= 75 ? 'badge-green' : pct >= 50 ? 'badge-yellow' : 'badge-orange';
+      return `<span class="badge ${cls}">${pct}%</span>`;
+    case 'triage':
+      if (!val || val === 'none') return '<span class="badge badge-grey">none</span>';
+      if (val === 'install_sensor') return '<span class="badge badge-orange">install_sensor</span>';
+      if (val === 'reviewed')       return '<span class="badge badge-green">reviewed</span>';
+      return `<span class="badge badge-grey">${val}</span>`;
+    default: return val || '—';
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+//  PAGINATION
+// ──────────────────────────────────────────────────────────────
+function renderPagination(total, pages) {
+  const pag = document.getElementById('pagination');
+  if (pages <= 1) {
+    pag.innerHTML = `<div class="page-info">Page <strong>1</strong> of <strong>1</strong></div><div class="page-btns"></div>`;
+    return;
+  }
+
+  const start = S.page * S.pageSize + 1;
+  const end   = Math.min((S.page + 1) * S.pageSize, total);
+
+  let btns = '';
+  const range = pageRange(S.page, pages);
+  range.forEach(p => {
+    if (p === '…') btns += `<button class="page-btn ellipsis">…</button>`;
+    else btns += `<button class="page-btn${p === S.page ? ' current' : ''}" onclick="goPage(${p})">${p+1}</button>`;
+  });
+
+  pag.innerHTML = `
+    <div class="page-info">Page <strong>${S.page+1}</strong> of <strong>${pages}</strong> · records ${start.toLocaleString()}–${end.toLocaleString()}</div>
+    <div class="page-btns">
+      <button class="page-btn" onclick="goPage(${S.page-1})" ${S.page===0?'disabled':''}>← Prev</button>
+      ${btns}
+      <button class="page-btn" onclick="goPage(${S.page+1})" ${S.page>=pages-1?'disabled':''}>Next →</button>
+    </div>`;
+}
+
+function pageRange(cur, total) {
+  if (total <= 7) return Array.from({length: total}, (_, i) => i);
+  const r = [0];
+  if (cur > 2) r.push('…');
+  for (let i = Math.max(1, cur-1); i <= Math.min(total-2, cur+1); i++) r.push(i);
+  if (cur < total - 3) r.push('…');
+  r.push(total - 1);
+  return r;
+}
+
+function goPage(p) {
+  const rows = getFilteredRows();
+  const pages = Math.ceil(rows.length / S.pageSize) || 1;
+  S.page = Math.max(0, Math.min(p, pages - 1));
+  renderTable();
+  document.getElementById('table-scroll').scrollTop = 0;
+}
+
+// ──────────────────────────────────────────────────────────────
+//  DETAIL PANEL
+// ──────────────────────────────────────────────────────────────
+function openDetail(row) {
+  S.activeRow = row;
+  const r = row._raw;
+
+  document.getElementById('detail-title').textContent = row.hostname || row.id || '(no hostname)';
+  document.getElementById('detail-tag').textContent   = [row.entity_type, row.platform, row.os].filter(Boolean).join(' · ') || '—';
+
+  const body = document.getElementById('detail-body');
+  body.innerHTML = '';
+
+  // Group fields into sections
+  const sections = buildDetailSections(r, S.tab);
+  sections.forEach(section => {
+    const title = document.createElement('div');
+    title.className = 'detail-section-title';
+    title.textContent = section.title;
+    body.appendChild(title);
+
+    section.fields.forEach(([key, val]) => {
+      if (val === undefined || val === null || val === '') return;
+      const row_el = document.createElement('div');
+      row_el.className = 'detail-row';
+      const k = document.createElement('div');
+      k.className = 'detail-key';
+      k.textContent = key;
+      const v = document.createElement('div');
+      v.className = 'detail-val';
+      if (Array.isArray(val)) {
+        v.textContent = val.join(', ');
+      } else if (typeof val === 'object') {
+        v.textContent = JSON.stringify(val);
+        v.className += ' dim';
+      } else {
+        v.textContent = String(val);
+        if (key === 'ip' || key.includes('ip') || key.includes('IP')) v.className += ' highlight';
+      }
+      row_el.appendChild(k);
+      row_el.appendChild(v);
+      body.appendChild(row_el);
+    });
+  });
+
+  document.getElementById('detail-panel').classList.add('open');
+  document.getElementById('overlay').classList.add('visible');
+
+  // Re-render to highlight active row
+  renderTable();
+}
+
+function buildDetailSections(r, tab) {
+  // Managed host
+  if (tab === 'hosts' || tab === 'cloud' || tab === 'kubernetes' || tab === 'hidden') {
+    const sections = [
+      {title: 'Identity', fields: [
+        ['Hostname',     r.hostname],
+        ['Device ID',    r.device_id],
+        ['AID',          r.device_id],
+        ['CID',          r.cid],
+        ['Status',       r.status],
+        ['Criticality',  r.criticality],
+        ['RFM',          r.reduced_functionality_mode],
+      ]},
+      {title: 'Network', fields: [
+        ['Local IP',     r.local_ip],
+        ['External IP',  r.external_ip],
+        ['MAC',          r.mac_address],
+        ['Domain',       r.machine_domain],
+      ]},
+      {title: 'System', fields: [
+        ['Platform',     r.platform_name],
+        ['OS Version',   r.os_version],
+        ['Build',        r.os_build],
+        ['CPU Vendor',   r.cpu_vendor],
+        ['BIOS',         r.bios_version],
+        ['Manufacturer', r.system_manufacturer],
+        ['Product',      r.system_product_name],
+      ]},
+      {title: 'Sensor', fields: [
+        ['Agent Version', r.agent_version],
+        ['Agent Load',    r.agent_load_flags],
+        ['RTR State',     r.rtr_state],
+        ['Safe Mode',     r.safe_mode],
+        ['First Seen',    r.first_seen],
+        ['Last Seen',     r.last_seen],
+        ['Local Time',    r.agent_local_time],
+      ]},
+    ];
+    if (r.service_provider) {
+      sections.push({title: 'Cloud', fields: [
+        ['Provider',     r.service_provider],
+        ['Account ID',   r.service_provider_account_id],
+        ['Instance ID',  r.instance_id],
+        ['Zone / Group', r.zone_group],
+      ]});
+    }
+    if (r.pod_namespace) {
+      sections.push({title: 'Kubernetes', fields: [
+        ['Namespace',    r.pod_namespace],
+        ['Pod Name',     r.pod_name],
+        ['Pod ID',       r.pod_id],
+        ['Pod IP',       r.pod_ip4],
+        ['Host IP',      r.pod_host_ip4],
+        ['Svc Account',  r.pod_service_account_name],
+        ['Labels',       r.pod_labels ? JSON.stringify(r.pod_labels) : undefined],
+      ]});
+    }
+    return sections;
+  }
+
+  // Discover
+  if (tab === 'discover') {
+    return [
+      {title: 'Identity', fields: [
+        ['Hostname',     r.hostname],
+        ['ID',           r.id],
+        ['Entity Type',  r.entity_type],
+        ['AID',          r.aid],
+      ]},
+      {title: 'Network', fields: [
+        ['Current IP',   r.current_local_ip],
+        ['External IP',  r.external_ip],
+        ['Local IPs',    (r.local_ip_addresses || []).join(', ')],
+        ['Network Prefix',r.current_network_prefix],
+      ]},
+      {title: 'System', fields: [
+        ['Platform',     r.platform_name],
+        ['OS Version',   r.os_version],
+        ['Kernel',       r.kernel_version],
+        ['Product Type', r.product_type_desc],
+        ['Manufacturer', r.system_manufacturer],
+        ['Product',      r.system_product_name],
+      ]},
+      {title: 'Location', fields: [
+        ['Country',      r.country],
+        ['City',         r.city],
+      ]},
+      {title: 'Discovery', fields: [
+        ['Confidence',   r.confidence ? r.confidence + '%' : undefined],
+        ['Discoverers',  r.discoverer_count],
+        ['Data Providers',r.data_providers_count],
+        ['First Seen',   r.first_seen_timestamp],
+        ['Last Seen',    r.last_seen_timestamp],
+        ['Internet Exposure', r.composite_internet_exposure],
+      ]},
+    ];
+  }
+
+  // Gaps
+  return [
+    {title: 'Identity', fields: [
+      ['Hostname',     r.hostname],
+      ['ID',           r.id],
+      ['Entity Type',  r.entity_type],
+    ]},
+    {title: 'Network', fields: [
+      ['Current IP',   r.current_local_ip],
+      ['Local IPs',    (r.local_ip_addresses || []).join(', ')],
+    ]},
+    {title: 'System', fields: [
+      ['Platform',     r.platform_name],
+      ['OS Version',   r.os_version],
+      ['Product Type', r.product_type_desc],
+      ['Manufacturer', r.system_manufacturer],
+    ]},
+    {title: 'Gap Analysis', fields: [
+      ['Confidence',   r.confidence ? r.confidence + '%' : undefined],
+      ['Triage Action',r.triage_action],
+      ['Classification',r.classification],
+      ['Used For',     r.used_for],
+      ['Internet Exposure', r.composite_internet_exposure],
+      ['First Seen',   r.first_seen_timestamp],
+      ['Last Seen',    r.last_seen_timestamp],
+    ]},
+  ];
+}
+
+function closeDetail() {
+  S.activeRow = null;
+  document.getElementById('detail-panel').classList.remove('open');
+  document.getElementById('overlay').classList.remove('visible');
+  renderTable();
+}
+
+// ──────────────────────────────────────────────────────────────
+//  EXPORT CSV
+// ──────────────────────────────────────────────────────────────
+function exportCSV() {
+  const rows = sortRows(getFilteredRows());
+  const cols = TAB_COLUMNS[S.tab] || [];
+
+  const header = cols.map(c => `"${c.label}"`).join(',');
+  const lines  = rows.map(row =>
+    cols.map(c => {
+      const v = row[c.key];
+      return v !== undefined ? `"${String(v).replace(/"/g,'""')}"` : '""';
+    }).join(',')
+  );
+
+  const csv  = [header, ...lines].join('\n');
+  const blob = new Blob([csv], {type: 'text/csv'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `falcon_${S.tab}_${Date.now()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ──────────────────────────────────────────────────────────────
+//  UTILITIES
+// ──────────────────────────────────────────────────────────────
+function formatTs(ts) {
+  if (!ts) return '';
+  // Handle compact format: 20260605T205911Z
+  if (/^\d{8}T\d{6}Z$/.test(ts)) {
+    const y = ts.slice(0,4), mo = ts.slice(4,6), d = ts.slice(6,8);
+    const h = ts.slice(9,11), mi = ts.slice(11,13);
+    return `${y}-${mo}-${d} ${h}:${mi}Z`;
+  }
+  try {
+    const dt = new Date(ts);
+    return dt.toISOString().slice(0,16).replace('T',' ') + 'Z';
+  } catch { return ts; }
+}
+</script>
+</body>
+</html>
