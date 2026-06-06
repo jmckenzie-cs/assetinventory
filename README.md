@@ -49,43 +49,43 @@ Create an API client in **Falcon console → Support & Resources → API Clients
 
 ### Required scopes for `hosts_inventory.py`
 
-| Scope | Permission |
-|---|---|
-| Hosts | Read |
-| Discover | Read |
-| Kubernetes Protection | Read |
+| Scope | Access | Used for |
+|---|---|---|
+| Hosts | Read | Managed hosts, hidden devices, online state |
+| Discover | Read | Unmanaged assets, coverage gaps |
+| Kubernetes Protection | Read | K8s clusters, nodes, KAC/IAR coverage |
 
 ### Optional scopes (script skips gracefully if missing)
 
-| Scope | Used for |
-|---|---|
-| Cloud Security Assets | Cloud asset inventory |
-| CSPM Registration | Cloud account registration |
-| Host Groups | Group membership |
-| Zero Trust Assessment | ZTA scores |
-| Sensor Update Policy | Policy membership |
-| Prevention Policy | Policy membership |
-| Device Control Policies | Policy membership |
-| Response Policies | Policy membership |
-| Firewall Policies | Policy membership |
-| Sensor Download | Available sensor builds |
-| Installation Tokens | Provisioning tokens |
-| Spotlight Vulnerabilities | CVE exposure per host |
-| Spotlight Evaluation Logic | Spotlight rule data |
-| Device Content | Content state per device |
+| Scope | Access | Used for |
+|---|---|---|
+| Cloud Security Assets | Read | Cloud asset inventory |
+| CSPM Registration | Read | Cloud account registration |
+| Host Groups | Read | Group membership |
+| Zero Trust Assessment | Read | ZTA scores |
+| Sensor Update Policy | Read | Policy membership |
+| Prevention Policy | Read | Policy membership |
+| Device Control Policies | Read | Policy membership |
+| Response Policies | Read | Policy membership |
+| Firewall Policies | Read | Policy membership |
+| Sensor Download | Read | Available sensor builds |
+| Installation Tokens | Read | Provisioning tokens |
+| Spotlight Vulnerabilities | Read | CVE exposure per host |
+| Spotlight Evaluation Logic | Read | Spotlight rule data |
+| Device Content | Read | Content state per device |
 
 ### Additional scopes for `k8s_container_inventory.py`
 
-| Scope | Permission |
-|---|---|
-| Kubernetes Protection | Read |
-| Container Images | Read |
-| Container Vulnerabilities | Read |
-| Container Detections | Read |
-| Container Packages | Read |
-| Container Image Compliance | Read |
-| Kubernetes Container Compliance | Read |
-| Falcon Container | Read |
+| Scope | Access | Used for |
+|---|---|---|
+| Kubernetes Protection | Read | Clusters, nodes, pods, containers, IOMs |
+| Container Images | Read | Image details and vulnerability counts |
+| Container Vulnerabilities | Read | CVE exposure per image |
+| Container Detections | Read | Runtime detections per container |
+| Container Packages | Read | Packages / SBOMs across images |
+| Container Image Compliance | Read | CIS/compliance rule results |
+| Kubernetes Container Compliance | Read | K8s-level compliance aggregates |
+| Falcon Container | Read | Registry scan results, image assessments |
 
 403 responses are treated as "scope not available" — the script logs the skip and continues. No section will crash the run.
 
