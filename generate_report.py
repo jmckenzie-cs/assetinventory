@@ -552,7 +552,7 @@ def build_html(json_path, out_path):
                     ['Node','Cluster','Cloud','Region','Runtime','Sensor'],
                     [
                         [
-                            f'<span class="mono">{(n.get("node_name") or "")[-42:]}</span>',
+                            f'<span class="mono" title="{n.get("node_name") or ""}">{n.get("node_name") or ""}</span>',
                             (n.get('cluster_name') or '')[:30],
                             n.get('cloud_name') or '—',
                             (n.get('cloud_region') or '—')[:18],
