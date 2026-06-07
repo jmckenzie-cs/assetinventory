@@ -397,9 +397,10 @@ def build_html(json_path, out_path):
         ('Unsupported',      _fmt(unsupported),      RED),
         ('Container Hosts',  _fmt(container_hosts),  CYAN),
         ('K8s Nodes',        _fmt(k8s_node_hosts),   CYAN),
+        ('Standard Hosts',   _fmt(max(managed - container_hosts - k8s_node_hosts, 0)), GREY2),
         ('Managed Hosts Online Now',  f'{_fmt(online_count)} / {_fmt(managed)}', GREEN),
         ('Total Discovered', _fmt(total_disc),       GREY2),
-    ], cols=4)}
+    ], cols=3)}
     <div class="gauge-row">
       <div class="gauge-wrap">{_gauge(coverage, 140)}</div>
       {_callout(
