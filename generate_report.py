@@ -880,6 +880,8 @@ def build_html(json_path, out_path):
         _kac_csv_rows = [['Cluster','Cloud','Region','KAC','IAR','KAC Last Seen','Build']]
     if '_unmanaged_csv_rows' not in dir():
         _unmanaged_csv_rows = [['Hostname','Discoverer','Platform','OS Version','IP Address','Cloud Provider','Confidence','Container Signal','First Seen','Last Seen']]
+    if '_unsupported_csv_rows' not in dir():
+        _unsupported_csv_rows = [['Hostname / ID','Platform','OS Version','IP Address','Cloud Provider','Product Type','First Seen','Last Seen']]
     unsp      = cov_sum.get('unsupported', {})
     unsp_plat = unsp.get('by_platform', {})
     unsp_prod = unsp.get('by_product_type', {})
@@ -959,10 +961,60 @@ def build_html(json_path, out_path):
             (r.get('last_seen_timestamp') or '')[:10],
         ])
 
+    # Build CSV data and HTML for unsupported assets
+    unsupported_records = gaps.get('unsupported', [])
+    _unsupported_csv_rows = [['Hostname / ID','Platform','OS Version','IP Address',
+                              'Cloud Provider','Product Type','First Seen','Last Seen']]
+    unsp_rows_html = ''
+    for i, r in enumerate(sorted(unsupported_records, key=_sort_key)):
+        _raw_id    = r.get('id', '')
+        _cid       = r.get('cid', '')
+        _id_suffix = _raw_id.replace(_cid + '_', '', 1) if _raw_id.startswith(_cid + '_') else _raw_id
+        _disc_host = r.get('last_discoverer_hostname') or (r.get('discoverer_hostnames') or [None])[0]
+        hostname   = (r.get('hostname')
+                      or (_disc_host and f'<em title="Discovered by {_disc_host}" class="mono">{_disc_host}</em>')
+                      or f'<em class="mono">{_id_suffix[:20]}…</em>')
+        platform   = r.get('platform_name') or '—'
+        os_ver     = (r.get('os_version') or '—')[:32]
+        ip         = r.get('current_local_ip') or (r.get('local_ip_addresses') or [''])[0] or '—'
+        provider   = r.get('cloud_provider') or '—'
+        prod_type  = r.get('product_type_desc') or '—'
+        row_cls    = 'alt' if i % 2 else ''
+        unsp_rows_html += (
+            f'<tr class="{row_cls}">'
+            f'<td>{hostname}</td>'
+            f'<td style="text-align:center">{platform}</td>'
+            f'<td>{os_ver}</td>'
+            f'<td><span class="mono">{ip}</span></td>'
+            f'<td style="color:{GREY3}">{provider}</td>'
+            f'<td style="color:{GREY2}">{prod_type}</td>'
+            f'</tr>'
+        )
+        _unsupported_csv_rows.append([
+            r.get('hostname') or _disc_host or _id_suffix[:32],
+            r.get('platform_name') or '',
+            r.get('os_version') or '',
+            ip,
+            r.get('cloud_provider') or '',
+            r.get('product_type_desc') or '',
+            (r.get('first_seen_timestamp') or '')[:10],
+            (r.get('last_seen_timestamp') or '')[:10],
+        ])
+
     s8 = f"""
 <section id="s8">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px">
-    {_sh(8, f"Appendix — Unmanaged Asset List ({_fmt(unmanaged)} hosts)", ORANGE)}
+    {_sh(8, f"Appendix — Asset Detail Lists", ORANGE)}
+  </div>
+  <div style="display:flex;gap:8px;margin-bottom:4px">
+    <a href="#s8-unmanaged" style="font-size:11px;padding:3px 10px;border-radius:3px;background:#FFF3E0;color:{ORANGE};text-decoration:none;font-weight:600">&#9660; Unmanaged ({_fmt(unmanaged)})</a>
+    <a href="#s8-unsupported" style="font-size:11px;padding:3px 10px;border-radius:3px;background:#F5F5F5;color:{GREY2};text-decoration:none;font-weight:600">&#9660; Unsupported ({_fmt(unsupported)})</a>
+  </div>
+
+  <div id="s8-unmanaged" style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:4px;margin-top:16px">
+    <h3 style="margin:0;font-size:14px;font-weight:700;color:{ORANGE}">
+      Unmanaged Assets — {_fmt(unmanaged)} hosts (can accept sensor)
+    </h3>
     <button class="export-btn" onclick="exportCSV('unmanaged_assets')">&#8595; Export CSV</button>
   </div>
   <p class="note">
@@ -980,6 +1032,28 @@ def build_html(json_path, out_path):
         <th>IP Address</th><th>Cloud Provider</th><th>Conf</th><th>Ctrs</th>
       </tr></thead>
       <tbody>{rows_html}</tbody>
+    </table>
+  </div>
+
+  <div style="border-top:1px solid #eee;margin:24px 0 16px"></div>
+
+  <div id="s8-unsupported" style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:4px">
+    <h3 style="margin:0;font-size:14px;font-weight:700;color:{GREY2}">
+      Unsupported Assets — {_fmt(unsupported)} hosts (cannot run sensor)
+    </h3>
+    <button class="export-btn" onclick="exportCSV('unsupported_assets')">&#8595; Export CSV</button>
+  </div>
+  <p class="note">
+    Devices that cannot run the Falcon sensor (IoT, routers, network appliances, unidentified endpoints).
+    These are permanent blind spots requiring alternative security controls.
+  </p>
+  <div class="app-scroll">
+    <table class="dt app-table">
+      <thead><tr>
+        <th>Hostname / ID</th><th>Platform</th><th>OS Version</th>
+        <th>IP Address</th><th>Cloud Provider</th><th>Product Type</th>
+      </tr></thead>
+      <tbody>{unsp_rows_html if unsupported_records else '<tr><td colspan="6" style="text-align:center;color:#aaa">No unsupported assets found</td></tr>'}</tbody>
     </table>
   </div>
 </section>"""
@@ -1015,9 +1089,10 @@ def build_html(json_path, out_path):
         [['Asset Type','Resource ID','Resource Name','Account ID','Region','Status']])
 
     _js_data = json.dumps({
-        'unmanaged_assets': {'filename': 'unmanaged_assets.csv',      'rows': _unmanaged_csv_rows},
-        'kac_clusters':     {'filename': 'kac_iar_clusters.csv',       'rows': _kac_csv_rows},
-        'csa_unprotected':  {'filename': 'csa_unprotected_assets.csv', 'rows': _csa_csv_rows_final},
+        'unmanaged_assets':   {'filename': 'unmanaged_assets.csv',      'rows': _unmanaged_csv_rows},
+        'kac_clusters':       {'filename': 'kac_iar_clusters.csv',       'rows': _kac_csv_rows},
+        'csa_unprotected':    {'filename': 'csa_unprotected_assets.csv', 'rows': _csa_csv_rows_final},
+        'unsupported_assets': {'filename': 'unsupported_assets.csv',     'rows': _unsupported_csv_rows},
     }, ensure_ascii=False)
 
     _js = f"""<script>
