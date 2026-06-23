@@ -293,6 +293,14 @@ tr.cloud-row.alt td{background:#FFE8C6!important}
 /* FOOTER */
 footer{text-align:center;padding:20px;color:#A0AABA;font-size:11px;border-top:1px solid #D0D6E0;margin:0 auto;max-width:1200px}
 
+/* CSA DETAILS */
+.csa-details{margin-top:4px;margin-bottom:2px}
+.csa-details summary{cursor:pointer;font-size:12px;font-weight:700;color:#0090B0;padding:5px 0;user-select:none;list-style:none}
+.csa-details summary::-webkit-details-marker{display:none}
+.csa-details summary::before{content:"▸ ";font-size:10px}
+details[open].csa-details summary::before{content:"▾ "}
+.csa-details .dt{margin-top:6px;margin-bottom:8px}
+
 /* PAGE BREAK */
 .pb{display:none}
 
@@ -325,6 +333,7 @@ def build_html(json_path, out_path):
     disc_hosts = data.get('discover_hosts', [])
     gaps       = data.get('coverage_gaps', {})
     raw_hosts  = data.get('hosts', [])
+    csa_cov    = data.get('csa_coverage', {})
 
     csc = h_sum.get('by_container_status') or _compute_container_status(raw_hosts)
     container_hosts = csc.get('container', 0)
@@ -486,6 +495,7 @@ def build_html(json_path, out_path):
     {_rank('By Platform', sorted(by_plat.items(), key=lambda x:-x[1])[:8], managed, CYAN)}
     {_rank('By Product Type', sorted(by_prod.items(), key=lambda x:-x[1])[:8], managed, GREEN)}
   </div>
+  <p class="note"><strong>K8S platform / Kubernetes Cluster product type</strong> = hosts where the Falcon sensor is registered as a cluster-level object via the Hosts API. This count may be lower than the total cluster count in the Container Security section, which sources data from the Kubernetes Protection API and includes clusters visible via cloud integration without a deployed sensor.</p>
 
   <div class="sub-t">Online Status</div>
   <div class="two-col">
@@ -530,10 +540,142 @@ def build_html(json_path, out_path):
 </section>
 <div class="pb"></div>"""
 
-    # ── S4: CONTAINER SECURITY ─────────────────────────────────
+    # ── S4: CLOUD ASSET COVERAGE (CSPM) ────────────────────────
+    s4_csa = ''
+    if csa_cov and csa_cov.get('rows'):
+        csa_rows     = csa_cov.get('rows', [])
+        csa_details  = csa_cov.get('details', {})
+        csa_total_a  = csa_cov.get('total_assets', 0)
+
+        # Overall coverage: sum(with_sensors) / sum(total) for non-KAC rows
+        _csa_non_kac = [r for r in csa_rows if r.get('name') != 'K8s Clusters with KAC']
+        _csa_sum_w   = sum(r.get('with_sensors', 0) for r in _csa_non_kac)
+        _csa_sum_t   = sum(r.get('total_count', 0) for r in _csa_non_kac)
+        _csa_pct     = round(_csa_sum_w / _csa_sum_t * 100, 1) if _csa_sum_t else 0.0
+        _csa_pc      = _rc(_csa_pct)
+        _csa_gap     = _csa_sum_t - _csa_sum_w
+
+        # Coverage table rows
+        def _csa_row(row):
+            name   = row.get('name', '')
+            total  = row.get('total_count', 0)
+            with_s = row.get('with_sensors', 0)
+            wout_s = row.get('without_sensors', 0)
+            rate   = row.get('coverage_rate', 0.0)
+            est    = row.get('estimated', False)
+            errs   = row.get('errors', [])
+            rate_c = _rc(rate)
+            est_m  = '*' if est else ''
+            err_html = (f'<tr><td colspan="5" style="font-size:10px;color:{RED};padding:2px 11px 8px">'
+                        f'API error: {errs[0].get("errors") or errs}</td></tr>') if errs else ''
+            return (
+                f'<tr style="border-bottom:1px solid #F0F2F5">'
+                f'<td style="padding:10px 11px;font-weight:700">{name}</td>'
+                f'<td style="padding:10px 11px;text-align:center">{_fmt(total)}{est_m}</td>'
+                f'<td style="padding:10px 11px;text-align:center;color:{GREEN}">{_fmt(with_s)}{est_m}</td>'
+                f'<td style="padding:10px 11px;text-align:center;color:{ORANGE if wout_s else GREY3}">{_fmt(wout_s)}</td>'
+                f'<td style="padding:10px 11px;text-align:center;color:{rate_c};font-weight:700">{rate:.1f}%{est_m}</td>'
+                f'</tr>{err_html}'
+            )
+
+        _csa_table_rows = ''.join(_csa_row(r) for r in csa_rows)
+        _csa_has_k8s    = any(r.get('name','').startswith('K8s Clusters') for r in csa_rows)
+        _csa_has_est    = any(r.get('estimated') for r in csa_rows)
+        _csa_has_td     = any(r.get('name') == 'AWS ECS Task Definitions' for r in csa_rows)
+
+        # Unprotected asset drilldown using <details> elements
+        _csa_drilldown = ''
+        _csa_csv_rows  = [['Asset Type','Resource ID','Resource Name','Account ID','Region','Status']]
+        for row in csa_rows:
+            name = row.get('name','')
+            if name == 'K8s Clusters with KAC':
+                continue
+            td = csa_details.get(name, {})
+            assets = td.get('assets', [])
+            total_d = td.get('total', 0)
+            shown_d = td.get('shown', 0)
+            if not total_d:
+                continue
+            for a in assets:
+                _csa_csv_rows.append([
+                    name,
+                    a.get('resource_id') or '',
+                    a.get('resource_name') or '',
+                    a.get('account_id') or '',
+                    a.get('region') or '',
+                    a.get('status') or '',
+                ])
+            cap_note = (f'<p style="font-size:11px;color:{GREY3};margin:4px 0 6px 0">'
+                        f'Showing first {_fmt(shown_d)} of {_fmt(total_d)}</p>') if total_d > shown_d else ''
+            tbl = _table(
+                ['Resource ID','Name','Account','Region','Status'],
+                [[f'<span class="mono">{a.get("resource_id") or "—"}</span>',
+                  a.get('resource_name') or '—',
+                  a.get('account_id') or '—',
+                  a.get('region') or '—',
+                  a.get('status') or '—'] for a in assets],
+            )
+            _csa_drilldown += (
+                f'<details class="csa-details">'
+                f'<summary>{name} — {_fmt(total_d)} unprotected</summary>'
+                f'{cap_note}{tbl}'
+                f'</details>'
+            )
+
+        _csa_notes = ''
+        if _csa_has_est:
+            _csa_notes += '<p class="note">* Count exceeds one page of API results and may be estimated.</p>'
+        if _csa_has_k8s:
+            _csa_notes += (
+                '<p class="note">† K8s AWS/Azure sensor coverage counts clusters with ≥1 '
+                'sensor-equipped worker node, limited to clusters with KAC registered. '
+                'Clusters without KAC are counted as unprotected.</p>'
+            )
+        if _csa_has_td:
+            _csa_notes += (
+                '<p class="note">‡ AWS ECS Task Definitions coverage is determined by '
+                'inspecting the container configuration for Falcon sidecar indicators '
+                '(image name, environment variables, volume mounts). '
+                'Does not rely on <code>managed_by:\'Sensor\'</code>.</p>'
+            )
+
+        s4_csa = f"""
+<section id="s4">
+  {_sh(4, "Cloud Asset Coverage (CSPM)", CYAN)}
+  <p class="lead">
+    Sensor coverage across cloud resource types visible in Falcon Cloud Security (CSPM/CSA),
+    using the CloudSecurityAssets API.
+    <strong>{_fmt(csa_total_a)}</strong> total cloud assets tracked.
+  </p>
+  {_stat_grid([
+      ('Total Cloud Assets',  _fmt(csa_total_a), GREY2),
+      ('Covered',             _fmt(_csa_sum_w),  GREEN),
+      ('Uncovered',           _fmt(_csa_gap),    RED if _csa_gap else GREY2),
+      ('Overall Coverage',    f'{_csa_pct:.1f}%', _csa_pc),
+  ], cols=4)}
+  <table class="dt" style="margin-bottom:16px">
+    <thead><tr>
+      <th>Asset Type</th>
+      <th style="text-align:center">Total</th>
+      <th style="text-align:center">With Sensor</th>
+      <th style="text-align:center">Without Sensor</th>
+      <th style="text-align:center">Coverage</th>
+    </tr></thead>
+    <tbody>{_csa_table_rows}</tbody>
+  </table>
+  {_csa_notes}
+  <div class="sub-t" style="margin-top:20px">
+    Unprotected Assets
+    <button class="export-btn" onclick="exportCSV('csa_unprotected')" style="float:right;margin-top:-2px">&#8595; Export CSV</button>
+  </div>
+  {_csa_drilldown if _csa_drilldown else '<p class="note">No unprotected cloud assets found.</p>'}
+</section>
+<div class="pb"></div>"""
+
+    # ── S5: CONTAINER SECURITY (was S4) ────────────────────────
     k8s_inv         = data.get('k8s_nodes', {})
     k8s_inv_summary = k8s_inv.get('summary', {}) if isinstance(k8s_inv, dict) else {}
-    s4 = ''
+    s5 = ''
     if k8s_inv_summary:
         cov_data      = k8s_inv_summary.get('sensor_coverage', {})
         mgd_ctrs      = k8s_inv_summary.get('managed_containers', {})
@@ -703,9 +845,9 @@ def build_html(json_path, out_path):
   {'<div style="display:flex;align-items:center;justify-content:space-between;margin-top:20px;margin-bottom:8px"><span class="sub-t" style="font-size:11px;margin:0">Clusters with KAC / IAR Deployed</span><button class="export-btn" onclick="exportCSV(\'kac_clusters\')">&#8595; Export CSV</button></div>' + _kac_cluster_tbl if _kac_cluster_tbl else ''}
 """
 
-        s4 = f"""
-<section id="s4">
-  {_sh(4, "Container Security Coverage (Kubernetes Protection)", CYAN)}
+        s5 = f"""
+<section id="s5">
+  {_sh(5, "Container Security Coverage (Kubernetes Protection)", CYAN)}
   {_stat_grid([
       ('Total Containers',       _fmt(total_ctrs),                                              GREY2),
       ('Containers w/ Falcon',   _fmt(covered_ctrs),                                            GREEN),
@@ -714,6 +856,7 @@ def build_html(json_path, out_path):
       ('K8s Nodes',              _fmt(k8s_inv_summary.get('node_count',0)),                     CYAN),
       ('Pods',                   _fmt(k8s_inv_summary.get('pod_count',0)),                      CYAN),
   ], cols=3)}
+  <p class="note"><strong>K8s Clusters</strong> sourced from the Kubernetes Protection API — includes all clusters visible via cloud integration or deployed sensor. This may differ from the <em>K8S platform</em> count in Managed Hosts, which only reflects clusters with a Falcon sensor registered through the Hosts API.</p>
   <div class="gauge-row">
     <div class="gauge-wrap">{_gauge(ctr_pct, 140)}</div>
     {_callout(
@@ -732,7 +875,7 @@ def build_html(json_path, out_path):
 </section>
 <div class="pb"></div>"""
 
-    # ── S5: UNSUPPORTED ────────────────────────────────────────
+    # ── S6: UNSUPPORTED (was S5) ───────────────────────────────
     if '_kac_csv_rows' not in dir():
         _kac_csv_rows = [['Cluster','Cloud','Region','KAC','IAR','KAC Last Seen','Build']]
     if '_unmanaged_csv_rows' not in dir():
@@ -741,9 +884,9 @@ def build_html(json_path, out_path):
     unsp_plat = unsp.get('by_platform', {})
     unsp_prod = unsp.get('by_product_type', {})
 
-    s5 = f"""
-<section id="s5">
-  {_sh(5, "Unsupported Assets (Cannot be Managed)", GREY2)}
+    s6 = f"""
+<section id="s6">
+  {_sh(6, "Unsupported Assets (Cannot be Managed)", GREY2)}
   <p class="lead"><strong>{_fmt(unsupported)}</strong> assets cannot run the Falcon sensor (IoT devices, network infrastructure, unidentified endpoints). These represent known blind spots that require alternative security controls.</p>
   <div class="two-col">
     {_rank('By Platform', sorted(unsp_plat.items(),key=lambda x:-x[1])[:8], unsupported, GREY3) if unsp_plat else ''}
@@ -752,16 +895,16 @@ def build_html(json_path, out_path):
 </section>
 <div class="pb"></div>"""
 
-    # ── S6: RECOMMENDATIONS ────────────────────────────────────
+    # ── S7: RECOMMENDATIONS (was S6) ───────────────────────────
     recs = _recommendations(coverage, unmanaged, unsupported, managed, by_stat, gap_by_plat, k8s_total)
-    s6 = f"""
-<section id="s6">
-  {_sh(6, "Recommendations", RED)}
+    s7 = f"""
+<section id="s7">
+  {_sh(7, "Recommendations", RED)}
   <div class="recs">{''.join(_rec(p,t,b) for p,t,b in recs)}</div>
 </section>
 <div class="pb"></div>"""
 
-    # ── S7: APPENDIX ───────────────────────────────────────────
+    # ── S8: APPENDIX (was S7) ──────────────────────────────────
     IS_CLOUD = {'AWS_EC2_V2','AWS_EC2','AWS_EKS_FARGATE','AWS_ECS_FARGATE',
                 'AZURE','AZURE_CONTAINER_APPS','GCP'}
     unmanaged_records = gaps.get('unmanaged', [])
@@ -816,10 +959,10 @@ def build_html(json_path, out_path):
             (r.get('last_seen_timestamp') or '')[:10],
         ])
 
-    s7 = f"""
-<section id="s7">
+    s8 = f"""
+<section id="s8">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px">
-    {_sh(7, f"Appendix — Unmanaged Asset List ({_fmt(unmanaged)} hosts)", ORANGE)}
+    {_sh(8, f"Appendix — Unmanaged Asset List ({_fmt(unmanaged)} hosts)", ORANGE)}
     <button class="export-btn" onclick="exportCSV('unmanaged_assets')">&#8595; Export CSV</button>
   </div>
   <p class="note">
@@ -854,10 +997,11 @@ def build_html(json_path, out_path):
     <a href="#s1">Coverage</a>
     <a href="#s2">Managed Hosts</a>
     <a href="#s3">Cloud &amp; K8s</a>
-    <a href="#s4">Containers</a>
-    <a href="#s5">Unsupported</a>
-    <a href="#s6">Recommendations</a>
-    <a href="#s7">Appendix</a>
+    <a href="#s4">Cloud Coverage</a>
+    <a href="#s5">Containers</a>
+    <a href="#s6">Unsupported</a>
+    <a href="#s7">Recommendations</a>
+    <a href="#s8">Appendix</a>
   </div>
 </nav>"""
 
@@ -867,9 +1011,13 @@ def build_html(json_path, out_path):
         f'CONFIDENTIAL — authorized personnel only</footer>'
     )
 
+    _csa_csv_rows_final = locals().get('_csa_csv_rows',
+        [['Asset Type','Resource ID','Resource Name','Account ID','Region','Status']])
+
     _js_data = json.dumps({
-        'unmanaged_assets': {'filename': 'unmanaged_assets.csv', 'rows': _unmanaged_csv_rows},
-        'kac_clusters':     {'filename': 'kac_iar_clusters.csv',  'rows': _kac_csv_rows},
+        'unmanaged_assets': {'filename': 'unmanaged_assets.csv',      'rows': _unmanaged_csv_rows},
+        'kac_clusters':     {'filename': 'kac_iar_clusters.csv',       'rows': _kac_csv_rows},
+        'csa_unprotected':  {'filename': 'csa_unprotected_assets.csv', 'rows': _csa_csv_rows_final},
     }, ensure_ascii=False)
 
     _js = f"""<script>
@@ -906,10 +1054,11 @@ function exportCSV(key) {{
 {s1}
 {s2}
 {s3}
-{s4}
+{s4_csa}
 {s5}
 {s6}
 {s7}
+{s8}
 {footer}
 {_js}
 </body>
