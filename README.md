@@ -54,7 +54,7 @@ These two scopes are needed to produce any meaningful report output:
 | Scope | Access | Used for |
 |---|---|---|
 | Hosts | Read | Managed hosts, hidden devices, online state |
-| Discover | Read | Unmanaged assets, coverage gaps, appendix |
+| Assets | Read | Unmanaged assets, coverage gaps, appendix |
 
 ### Optional scopes (script skips gracefully if missing)
 
@@ -72,7 +72,7 @@ These scopes enable additional report sections. The report renders without them,
 | Prevention Policy | Read | Policy membership (JSON only, not in report) |
 | Device Control Policies | Read | Policy membership (JSON only, not in report) |
 | Response Policies | Read | Policy membership (JSON only, not in report) |
-| Firewall Policies | Read | Policy membership (JSON only, not in report) |
+| Firewall Management | Read | Policy membership (JSON only, not in report) |
 | Installation Tokens | Read | Provisioning tokens (JSON only, not in report) |
 | Spotlight Vulnerabilities | Read | CVE exposure per host (JSON only, not in report) |
 | Spotlight Evaluation Logic | Read | Spotlight rule data (JSON only, not in report) |
