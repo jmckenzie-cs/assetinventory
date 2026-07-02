@@ -173,6 +173,74 @@ def _callout(title, body, color):
 def _badge(label, color):
     return f'<span class="badge" style="background:{color};color:white">{label}</span>'
 
+def _api_panel(apis, logic_items, fql=None, conflicts=None):
+    """
+    apis       : list[str]  — API service.method names
+    logic_items: list[str]  — logic/calculation bullets (may include inline HTML)
+    fql        : str|None   — FQL filter to show in monospace
+    conflicts  : list[str]  — known count conflicts/discrepancies between APIs
+    """
+    apis_html = ''.join(f'<li><strong>{a}</strong></li>' for a in apis)
+    logic_html = ''.join(f'<li>{l}</li>' for l in logic_items)
+    fql_html = (
+        f'<div style="margin-top:8px"><h4>FQL Filter</h4>'
+        f'<span class="api-fql">{fql}</span></div>'
+    ) if fql else ''
+    conflict_html = ''
+    if conflicts:
+        items = ''.join(f'<li>{c}</li>' for c in conflicts)
+        conflict_html = (
+            f'<div class="api-conflict">'
+            f'<h4>&#9888; Known Count Conflicts</h4>'
+            f'<ul>{items}</ul>'
+            f'</div>'
+        )
+    tag = f'<span class="api-tag">{len(apis)} API{"s" if len(apis)>1 else ""}</span>'
+    return (
+        f'<details class="api-panel">'
+        f'<summary>{tag} &nbsp; API &amp; Data Sources</summary>'
+        f'<div class="api-panel-body">'
+        f'<div class="api-panel-col"><h4>APIs Called</h4><ul>{apis_html}</ul></div>'
+        f'<div class="api-panel-col"><h4>Logic &amp; Calculations</h4>'
+        f'<ul>{logic_html}</ul>{fql_html}</div>'
+        f'{conflict_html}'
+        f'</div></details>'
+    )
+
+def _legend(terms):
+    """
+    terms: list of (term, definition) tuples — rendered as an always-visible
+           inline legend bar directly below the section header.
+    """
+    items = ''.join(
+        f'<span class="legend-item">'
+        f'<span class="legend-term">{t}</span>'
+        f'<span class="legend-sep">—</span>'
+        f'<span class="legend-def">{d}</span>'
+        f'</span>'
+        for t, d in terms
+    )
+    return f'<div class="legend">{items}</div>'
+
+def _glossary(terms):
+    """
+    terms: list of (term, definition) — rendered as a two-column definition
+           grid inside a collapsible panel, intended for the cover page.
+    """
+    rows = ''.join(
+        f'<div class="glossary-row">'
+        f'<span class="glossary-term">{t}</span>'
+        f'<span class="glossary-def">{d}</span>'
+        f'</div>'
+        for t, d in terms
+    )
+    return (
+        f'<details class="glossary">'
+        f'<summary>&#128218; &nbsp; Key Terms &amp; Acronyms</summary>'
+        f'<div class="glossary-body">{rows}</div>'
+        f'</details>'
+    )
+
 def _table(headers, rows, col_align=None, row_classes=None):
     ths = ''.join(f'<th>{h}</th>' for h in headers)
     tbody = ''
@@ -301,6 +369,77 @@ footer{text-align:center;padding:20px;color:#A0AABA;font-size:11px;border-top:1p
 details[open].csa-details summary::before{content:"▾ "}
 .csa-details .dt{margin-top:6px;margin-bottom:8px}
 
+/* API CALLOUT PANEL */
+.api-panel{margin:0 0 16px 0;border-radius:4px;border:1px solid #3A4A60;background:#131F2E}
+.api-panel summary{
+  cursor:pointer;display:flex;align-items:center;gap:8px;
+  padding:7px 14px;font-size:11px;font-weight:700;color:#0090B0;
+  letter-spacing:.4px;text-transform:uppercase;user-select:none;list-style:none
+}
+.api-panel summary::-webkit-details-marker{display:none}
+.api-panel summary::before{content:"▸ ";font-size:10px;color:#6A7A99}
+details[open].api-panel summary::before{content:"▾ ";color:#0090B0}
+.api-panel summary .api-tag{
+  display:inline-block;padding:1px 7px;border-radius:3px;
+  font-size:10px;font-weight:700;background:#0090B015;
+  color:#0090B0;border:1px solid #0090B040;letter-spacing:.2px
+}
+.api-panel-body{
+  padding:10px 16px 14px;border-top:1px solid #1E2B3C;
+  display:grid;grid-template-columns:1fr 1fr;gap:12px 24px
+}
+.api-panel-col h4{
+  font-size:10px;font-weight:700;color:#6A7A99;text-transform:uppercase;
+  letter-spacing:.7px;margin:0 0 6px
+}
+.api-panel-col ul{margin:0;padding:0 0 0 14px}
+.api-panel-col li{font-size:11px;color:#A0AABA;line-height:1.7;margin:0}
+.api-panel-col li strong{color:#D0D6E0}
+.api-fql{
+  font-family:'SF Mono',Consolas,monospace;font-size:10px;
+  background:#0D1520;color:#7EC8D8;padding:2px 6px;border-radius:3px
+}
+.api-conflict{
+  grid-column:1/-1;margin-top:8px;padding:8px 12px;
+  border-radius:4px;border-left:3px solid #E8A030;background:#E8A03010
+}
+.api-conflict h4{color:#E8A030;margin:0 0 5px}
+.api-conflict ul{margin:0;padding:0 0 0 14px}
+.api-conflict li{font-size:11px;color:#C0A070;line-height:1.7}
+@media print{.api-panel{display:none}}
+
+/* TERM LEGEND */
+.legend{display:flex;flex-wrap:wrap;gap:6px 10px;margin:0 0 18px 0;padding:10px 14px;
+  background:#131F2E;border:1px solid #1E2B3C;border-radius:4px}
+.legend-item{display:flex;align-items:baseline;gap:5px;font-size:11px;line-height:1.4}
+.legend-term{font-weight:700;color:#D0D6E0;white-space:nowrap}
+.legend-sep{color:#3A4A60;font-size:10px}
+.legend-def{color:#A0AABA}
+.legend-item+.legend-item::before{content:"";display:inline-block;
+  width:1px;height:11px;background:#2A3A50;margin-right:4px;align-self:center}
+@media print{.legend{background:white;border-color:#ccc}
+  .legend-term{color:#111}.legend-def{color:#555}.legend-item+.legend-item::before{background:#bbb}}
+
+/* GLOSSARY PANEL */
+.glossary{margin:16px 0 0;border-radius:4px;border:1px solid #D0D6E0;background:#F8F9FB}
+.glossary summary{
+  cursor:pointer;display:flex;align-items:center;gap:8px;
+  padding:8px 14px;font-size:11px;font-weight:700;color:#3A4A60;
+  letter-spacing:.4px;text-transform:uppercase;user-select:none;list-style:none
+}
+.glossary summary::-webkit-details-marker{display:none}
+.glossary summary::before{content:"▸ ";font-size:10px;color:#6A7A99}
+details[open].glossary summary::before{content:"▾ ";color:#0090B0}
+.glossary-body{
+  padding:12px 16px 16px;border-top:1px solid #D0D6E0;
+  display:grid;grid-template-columns:1fr 1fr;gap:4px 32px
+}
+.glossary-row{display:flex;gap:8px;padding:4px 0;border-bottom:1px solid #F0F2F5;align-items:baseline}
+.glossary-row:last-child{border-bottom:none}
+.glossary-term{font-size:11px;font-weight:700;color:#0D1520;white-space:nowrap;min-width:110px;flex-shrink:0}
+.glossary-def{font-size:11px;color:#3A4A60;line-height:1.5}
+@media print{.glossary{display:none}}
+
 /* PAGE BREAK */
 .pb{display:none}
 
@@ -419,6 +558,28 @@ def build_html(json_path, out_path):
           rc
       )}
     </div>
+    {_glossary([
+        ('Falcon Sensor',    'Lightweight agent installed on a host that provides detection, prevention, and telemetry to CrowdStrike cloud'),
+        ('Managed',          'Host or asset with a Falcon sensor installed and actively checking in'),
+        ('Unmanaged',        'Asset discovered by Falcon on the network but with no sensor — can accept one'),
+        ('Unsupported',      'Asset Falcon has discovered but cannot protect — no sensor build exists (IoT, network gear, legacy OS)'),
+        ('Sensor-Eligible',  'Managed + Unmanaged; the denominator for coverage % calculations'),
+        ('Coverage %',       'Managed ÷ Sensor-Eligible × 100; unsupported assets are excluded'),
+        ('Discover API',     'Falcon API that surfaces shadow IT and network-discovered assets without requiring a sensor'),
+        ('Hosts API',        'Falcon API for sensor-registered managed devices — the authoritative source for managed host data'),
+        ('CSPM',             'Cloud Security Posture Management — monitors cloud infrastructure for misconfigurations and compliance drift'),
+        ('CSA',              'Cloud Security Assets — the API service name (CloudSecurityAssets) and dataset that backs CSPM in Falcon'),
+        ('KAC',              'Kubernetes Admission Controller — Falcon webhook that intercepts workloads at deploy time to enforce policy'),
+        ('IAR',              'Image Assessment at Runtime — continuously scans running container images for vulnerabilities'),
+        ('FQL',              'Falcon Query Language — SQL-like filter syntax used across Falcon APIs (e.g. managed_by:\'Sensor\')'),
+        ('ECS',              'Amazon Elastic Container Service — AWS managed container orchestration platform'),
+        ('EKS',              'Amazon Elastic Kubernetes Service — AWS managed Kubernetes'),
+        ('AKS',              'Azure Kubernetes Service — Microsoft Azure managed Kubernetes'),
+        ('GKE',              'Google Kubernetes Engine — Google Cloud managed Kubernetes'),
+        ('Fargate',          'AWS serverless compute engine for containers (ECS/EKS); no persistent VM to install a sensor on'),
+        ('Containment',      'Network isolation applied by Falcon to a host — all traffic blocked except communication to Falcon cloud'),
+        ('CID',              'Customer ID — unique identifier for your CrowdStrike tenant'),
+    ])}
   </div>
 </div>
 <div class="pb"></div>"""
@@ -426,7 +587,6 @@ def build_html(json_path, out_path):
     # ── S1: SENSOR COVERAGE ────────────────────────────────────
     gap_by_plat = cov_sum.get('gap', {}).get('by_platform', {})
     top_plat    = sorted(gap_by_plat.items(), key=lambda x:-x[1])[:10]
-    _ca_c2 = {1:'center', 2:'center'}
 
     _s1_cov_table = _table(
         ['Asset Category','Count','% of Sensor-Eligible'],
@@ -443,6 +603,26 @@ def build_html(json_path, out_path):
     s1 = f"""
 <section id="s1">
   {_sh(1, "Sensor Coverage Analysis")}
+  {_api_panel(
+      apis=['Discover.query_hosts', 'Discover.get_hosts', 'Hosts.query_devices_by_filter_scroll'],
+      logic_items=[
+          '<strong>sensor_coverage_pct</strong> = managed &divide; (managed + unmanaged)',
+          'Unsupported assets excluded from the denominator',
+          'Unmanaged = Discover assets where <code>managed_by</code> &ne; Supported/Not Supported',
+      ],
+      fql="managed_by:'Not Supported'",
+      conflicts=[
+          'Hosts API and Discover API are queried independently — <strong>no cross-deduplication</strong> by hostname, IP, or MAC. A host recently de-sensored may appear as "managed" in Hosts API and "unmanaged" in Discover API simultaneously (delayed sync), inflating both counts.',
+          '<strong>manageable_total = managed + unmanaged</strong> assumes zero overlap. Any overlap causes double-counting, making coverage_pct appear lower than reality.',
+      ]
+  )}
+  {_legend([
+      ('Managed',          'Host has a Falcon sensor installed and is actively checked in'),
+      ('Unmanaged',        'Discovered by Falcon but no sensor installed — can accept one'),
+      ('Unsupported',      'Cannot run the Falcon sensor (IoT, network gear, etc.) — excluded from coverage math'),
+      ('Sensor-Eligible',  'Managed + Unmanaged; the denominator for coverage %'),
+      ('Coverage %',       'Managed ÷ Sensor-Eligible × 100'),
+  ])}
   <div class="two-col">
     <div>
       {_s1_cov_table}
@@ -466,11 +646,13 @@ def build_html(json_path, out_path):
         f' ({_pct(contained, managed)} of managed fleet).</div>'
     ) if contained else ''
 
+    unknown_count = state_counts.get('unknown', 0)
     _s2_online_table = _table(
         ['Status','Count','% of Managed'],
         [
             [f'<span class="chip-g">Online</span>', _fmt(online_count),  _pct(online_count, managed)],
             ['Offline',                              _fmt(offline_count), _pct(offline_count, managed)],
+            *([[f'<span style="color:{GREY3}">Unknown</span>', _fmt(unknown_count), _pct(unknown_count, managed)]] if unknown_count else []),
         ],
         col_align={1:'center', 2:'center'}
     )
@@ -491,6 +673,31 @@ def build_html(json_path, out_path):
     s2 = f"""
 <section id="s2">
   {_sh(2, "Managed Hosts (Falcon Protected)")}
+  {_api_panel(
+      apis=['Hosts.query_devices_by_filter_scroll', 'Hosts.get_device_details', 'Hosts.get_online_state'],
+      logic_items=[
+          'Age buckets derived from <code>last_seen</code> field',
+          'Container classification: <code>product_type=Pod</code> or EKS/ECS <code>service_provider</code>',
+          'K8s node: <code>product_type_desc=\'Kubernetes Cluster\'</code>',
+          '<strong>Standard Hosts</strong> = managed &minus; containers &minus; k8s_nodes',
+          'Containment status from <code>filesystem_containment_status</code>',
+      ],
+      fql="product_type_desc:!'Mobile'",
+      conflicts=[
+          '<strong>Online Now vs Managed count may disagree:</strong> <code>get_online_state</code> is called in batches of 100; if any batch fails silently, the online count reflects fewer devices than the actual managed total. No completeness validation is performed.',
+          '<strong>Container vs K8s Node classification is mutually exclusive in code</strong> but edge cases exist: a host with <code>service_provider=\'AWS_EKS_FARGATE\'</code> AND <code>product_type=\'Kubernetes Cluster\'</code> is classified as "container" (first <code>if</code> wins). "Standard Hosts" is reduced by any misclassified host.',
+      ]
+  )}
+  {_legend([
+      ('Managed Host',     'Any device with a live Falcon sensor; the source of truth for this section'),
+      ('Standard Host',    'Managed host that is neither a container/pod nor a Kubernetes node'),
+      ('Container / Pod',  'Managed host classified as a running container (product_type=Pod or EKS/ECS/ACA provider)'),
+      ('K8s Node',         'Managed host that acts as a Kubernetes worker node or cluster object'),
+      ('Online',           'Sensor heartbeat confirmed active at time of inventory pull'),
+      ('Offline',          'No recent heartbeat — sensor may be dormant, not decommissioned'),
+      ('Contained',        'Host network-isolated by Falcon; all traffic blocked except to Falcon cloud'),
+      ('Last Check-in',    'Age bucket based on last_seen timestamp from the Hosts API'),
+  ])}
   <div class="two-col">
     {_rank('By Platform', sorted(by_plat.items(), key=lambda x:-x[1])[:8], managed, CYAN)}
     {_rank('By Product Type', sorted(by_prod.items(), key=lambda x:-x[1])[:8], managed, GREEN)}
@@ -525,6 +732,26 @@ def build_html(json_path, out_path):
     s3 = f"""
 <section id="s3">
   {_sh(3, "Cloud & Kubernetes Coverage", CYAN)}
+  {_api_panel(
+      apis=['Hosts.query_devices_by_filter (cloud hosts)', 'Hosts.query_devices_by_filter (K8s pods)'],
+      logic_items=[
+          'Cloud host = managed host with <code>service_provider</code> in AWS/Azure/GCP set',
+          'K8s pod = managed host with <code>pod_namespace</code> populated',
+          '<strong>cloud_pct</strong> = cloud_total &divide; managed',
+      ],
+      fql="service_provider:['AWS_EC2','AZURE','GCP','AWS_EKS_FARGATE',...]",
+      conflicts=[
+          '<strong>Cloud host count here &ne; CSA total in S4.</strong> This section counts only managed hosts with Falcon sensors running in cloud. S4 counts all cloud resources (managed or not) via the CloudSecurityAssets API — fundamentally different denominators.',
+          '<strong>K8s pod count here &ne; container count in S5.</strong> This section counts Falcon-instrumented pods via Hosts API (<code>pod_namespace</code> filter). S5 uses the KubernetesProtection API and counts all containers/pods cluster-wide, regardless of sensor presence. Expect S3 to be much lower than S5\'s "Total Containers."',
+      ]
+  )}
+  {_legend([
+      ('Cloud Host',         'Managed host (Falcon sensor present) whose service_provider is AWS, Azure, or GCP'),
+      ('K8s Pod (here)',     'Falcon-instrumented pod identified via pod_namespace field in the Hosts API — sensor must be present'),
+      ('Cloud Provider',     'The hyperscaler platform: AWS, Azure, or GCP as reported by the sensor'),
+      ('Cloud Account',      'AWS account ID, Azure subscription, or GCP project containing the host'),
+      ('NOT CSA count',      'These counts reflect sensored hosts only — S4 shows all cloud resources including unsensored'),
+  ])}
   <p class="lead"><strong>{_fmt(cloud_total)}</strong> of {_fmt(managed)} managed hosts ({cloud_pct:.0f}%) run in cloud environments.</p>
 
   <div class="two-col">
@@ -541,11 +768,14 @@ def build_html(json_path, out_path):
 <div class="pb"></div>"""
 
     # ── S4: CLOUD ASSET COVERAGE (CSPM) ────────────────────────
+    _csa_csv_rows     = [['Asset Type','Resource ID','Resource Name','Account ID','Region','Status']]
+    _csa_mgd_csv_rows = [['Asset Type','Resource ID','Resource Name','Account ID','Region','Status']]
     s4_csa = ''
     if csa_cov and csa_cov.get('rows'):
-        csa_rows     = csa_cov.get('rows', [])
-        csa_details  = csa_cov.get('details', {})
-        csa_total_a  = csa_cov.get('total_assets', 0)
+        csa_rows         = csa_cov.get('rows', [])
+        csa_details      = csa_cov.get('details', {})
+        csa_mgd_details  = csa_cov.get('managed_details', {})
+        csa_total_a      = csa_cov.get('total_assets', 0)
 
         # Overall coverage: sum(with_sensors) / sum(total) for non-KAC rows
         _csa_non_kac = [r for r in csa_rows if r.get('name') != 'K8s Clusters with KAC']
@@ -583,8 +813,8 @@ def build_html(json_path, out_path):
         _csa_has_est    = any(r.get('estimated') for r in csa_rows)
         _csa_has_td     = any(r.get('name') == 'AWS ECS Task Definitions' for r in csa_rows)
 
-        # Unprotected asset drilldown using <details> elements
         _csa_drilldown = ''
+        _csa_notes     = ''
         _csa_csv_rows  = [['Asset Type','Resource ID','Resource Name','Account ID','Region','Status']]
         for row in csa_rows:
             name = row.get('name','')
@@ -617,12 +847,48 @@ def build_html(json_path, out_path):
             )
             _csa_drilldown += (
                 f'<details class="csa-details">'
-                f'<summary>{name} — {_fmt(total_d)} unprotected</summary>'
+                f'<summary>{name} — {_fmt(total_d)} unmanaged</summary>'
                 f'{cap_note}{tbl}'
                 f'</details>'
             )
 
-        _csa_notes = ''
+        # Managed asset drilldown
+        _csa_mgd_drilldown = ''
+        for row in csa_rows:
+            name = row.get('name','')
+            if name == 'K8s Clusters with KAC':
+                continue
+            td = csa_mgd_details.get(name, {})
+            assets = td.get('assets', [])
+            total_d = td.get('total', 0)
+            shown_d = td.get('shown', 0)
+            if not total_d:
+                continue
+            for a in assets:
+                _csa_mgd_csv_rows.append([
+                    name,
+                    a.get('resource_id') or '',
+                    a.get('resource_name') or '',
+                    a.get('account_id') or '',
+                    a.get('region') or '',
+                    a.get('status') or '',
+                ])
+            cap_note = (f'<p style="font-size:11px;color:{GREY3};margin:4px 0 6px 0">'
+                        f'Showing first {_fmt(shown_d)} of {_fmt(total_d)}</p>') if total_d > shown_d else ''
+            tbl = _table(
+                ['Resource ID','Name','Account','Region','Status'],
+                [[f'<span class="mono">{a.get("resource_id") or "—"}</span>',
+                  a.get('resource_name') or '—',
+                  a.get('account_id') or '—',
+                  a.get('region') or '—',
+                  a.get('status') or '—'] for a in assets],
+            )
+            _csa_mgd_drilldown += (
+                f'<details class="csa-details">'
+                f'<summary>{name} — {_fmt(total_d)} managed</summary>'
+                f'{cap_note}{tbl}'
+                f'</details>'
+            )
         if _csa_has_est:
             _csa_notes += '<p class="note">* Count exceeds one page of API results and may be estimated.</p>'
         if _csa_has_k8s:
@@ -642,6 +908,35 @@ def build_html(json_path, out_path):
         s4_csa = f"""
 <section id="s4">
   {_sh(4, "Cloud Asset Coverage (CSPM)", CYAN)}
+  {_api_panel(
+      apis=[
+          'CloudSecurityAssets.query_assets (total per asset type)',
+          'CloudSecurityAssets.query_assets (managed_by:Sensor — managed assets)',
+          'Hosts.query_devices_by_filter (K8s cluster KAC workaround)',
+      ],
+      logic_items=[
+          'Each asset type row: <strong>coverage_rate</strong> = with_sensor &divide; total',
+          'ECS Task Defs: container config inspection (image names, env vars, volume mounts)',
+          'K8s clusters: uses Hosts API <code>product_type_desc:\'Kubernetes Cluster\'</code> as proxy',
+          'Counts marked <strong>*</strong> are capped at pagination offset limit (9,900)',
+      ],
+      fql="managed_by:'Sensor'",
+      conflicts=[
+          '<strong>CSA K8s cluster totals vs KAC workaround totals may disagree.</strong> If CSA returns 0 for a cloud\'s K8s clusters, the report falls back to the KAC workaround count as the total — meaning sensor count = total = 100% coverage artificially.',
+          '<strong>ECS Task Definition coverage uses a different methodology</strong> than all other rows. Standard rows use <code>managed_by:\'Sensor\'</code>; ECS Task Defs inspect container image names, env vars, and volume mounts — a heuristic that can produce false positives or miss newly structured deployments.',
+          '<strong>Estimated counts (*):</strong> When an asset type exceeds the API pagination offset limit (9,900 records), total count is capped. Actual totals and coverage rates are approximate.',
+          '<strong>KAC K8s cluster row is NOT added to total_assets</strong> to avoid double-counting clusters already counted in per-cloud K8s rows. Manual summation of the table will exceed the "Total Cloud Assets" headline.',
+      ]
+  )}
+  {_legend([
+      ('Cloud Asset',      'Any cloud resource (VM, container, bucket, function, cluster, etc.) visible in Falcon CSPM — includes unmanaged ones'),
+      ('Managed',          'Cloud asset where Falcon detects a sensor via managed_by:Sensor — actively protected'),
+      ('Unmanaged',        'Cloud asset visible in CSPM but no sensor detected — blind spot'),
+      ('Coverage %',       'Managed ÷ Total for each asset type row'),
+      ('* Estimated',      'Total count capped at API pagination limit (9,900); actual total and coverage % are approximate'),
+      ('KAC',              'Kubernetes Admission Controller — Falcon admission webhook deployed to a cluster'),
+      ('ECS Task Def',     'AWS ECS Task Definition; coverage detected via image/env/volume heuristic, not managed_by:Sensor'),
+  ])}
   <p class="lead">
     Sensor coverage across cloud resource types visible in Falcon Cloud Security (CSPM/CSA),
     using the CloudSecurityAssets API.
@@ -649,30 +944,40 @@ def build_html(json_path, out_path):
   </p>
   {_stat_grid([
       ('Total Cloud Assets',  _fmt(csa_total_a), GREY2),
-      ('Covered',             _fmt(_csa_sum_w),  GREEN),
-      ('Uncovered',           _fmt(_csa_gap),    RED if _csa_gap else GREY2),
+      ('Managed',             _fmt(_csa_sum_w),  GREEN),
+      ('Unmanaged',           _fmt(_csa_gap),    RED if _csa_gap else GREY2),
       ('Overall Coverage',    f'{_csa_pct:.1f}%', _csa_pc),
   ], cols=4)}
   <table class="dt" style="margin-bottom:16px">
     <thead><tr>
       <th>Asset Type</th>
       <th style="text-align:center">Total</th>
-      <th style="text-align:center">With Sensor</th>
-      <th style="text-align:center">Without Sensor</th>
+      <th style="text-align:center">Managed</th>
+      <th style="text-align:center">Unmanaged</th>
       <th style="text-align:center">Coverage</th>
     </tr></thead>
     <tbody>{_csa_table_rows}</tbody>
   </table>
   {_csa_notes}
   <div class="sub-t" style="margin-top:20px">
-    Unprotected Assets
+    Unmanaged Assets
     <button class="export-btn" onclick="exportCSV('csa_unprotected')" style="float:right;margin-top:-2px">&#8595; Export CSV</button>
   </div>
-  {_csa_drilldown if _csa_drilldown else '<p class="note">No unprotected cloud assets found.</p>'}
+  {_csa_drilldown if _csa_drilldown else '<p class="note">No unmanaged cloud assets found.</p>'}
+  <div class="sub-t" style="margin-top:20px">
+    Managed Assets
+    <button class="export-btn" onclick="exportCSV('csa_managed_assets')" style="float:right;margin-top:-2px">&#8595; Export CSV</button>
+  </div>
+  <p class="note">Per-asset drilldown for cloud resources with a Falcon sensor detected via <code>managed_by:'Sensor'</code>. &nbsp;
+    <strong>AWS ECS Task Definitions</strong> are excluded — their coverage is determined by container config inspection (image name / env vars / volume mounts), not the <code>managed_by</code> field, so a per-asset list is not available here. &nbsp;
+    <strong>K8s cluster</strong> managed lists are derived from Hosts API hostname correlation and may be incomplete where CSA cluster names differ from Hosts API hostnames.
+  </p>
+  {_csa_mgd_drilldown if _csa_mgd_drilldown else '<p class="note">No managed cloud asset details available.</p>'}
 </section>
 <div class="pb"></div>"""
 
-    # ── S5: CONTAINER SECURITY (was S4) ────────────────────────
+    # ── S5: CONTAINER SECURITY ─────────────────────────────────
+    _kac_csv_rows = [['Cluster','Cloud','Region','KAC','IAR','KAC Last Seen','Build']]
     k8s_inv         = data.get('k8s_nodes', {})
     k8s_inv_summary = k8s_inv.get('summary', {}) if isinstance(k8s_inv, dict) else {}
     s5 = ''
@@ -686,7 +991,7 @@ def build_html(json_path, out_path):
         ctr_pct       = cov_data.get('coverage_pct', 0)
         unmanaged_ctrs= mgd_ctrs.get('Unmanaged', 0)
         ctr_color     = _rc(ctr_pct)
-        ctr_risk      = 'CRITICAL' if ctr_pct < 40 else ('MODERATE' if ctr_pct < 70 else 'GOOD')
+        ctr_risk      = 'CRITICAL' if ctr_pct < 40 else ('HIGH' if ctr_pct < 70 else 'GOOD')
 
         nodes_list   = k8s_inv.get('nodes', [])
         active_nodes = [n for n in nodes_list if n.get('resource_status') != 'deleted']
@@ -848,10 +1153,42 @@ def build_html(json_path, out_path):
         s5 = f"""
 <section id="s5">
   {_sh(5, "Container Security Coverage (Kubernetes Protection)", CYAN)}
+  {_api_panel(
+      apis=[
+          'KubernetesProtection.read_nodes_combined',
+          'KubernetesProtection.read_clusters_combined_v2',
+          'KubernetesProtection.read_sensor_coverage',
+          'KubernetesProtection.group_managed_containers',
+          'KubernetesProtection.read_pod_counts',
+          'KubernetesProtection.read_container_counts',
+          'KubernetesProtection.read_node_counts_by_cloud',
+          'KubernetesProtection.read_nodes_by_container_engine_version',
+      ],
+      logic_items=[
+          '<strong>container_coverage_pct</strong> = managed_containers &divide; total_containers',
+          'KAC coverage = clusters with admission controller &divide; total clusters',
+          'IAR = clusters with image assessment &divide; total clusters',
+          'Includes clusters visible via cloud integration even without a Falcon sensor',
+      ],
+      conflicts=[
+          '<strong>S5 cluster count vs S3 K8s count:</strong> KubernetesProtection API includes clusters visible via cloud integration even without a Falcon sensor. S3\'s K8s pod count (Hosts API <code>pod_namespace</code> filter) only reflects Falcon-instrumented pods. These are not comparable.',
+          '<strong>S5 cluster count vs S4 CSA K8s rows:</strong> CSA counts K8s clusters as cloud resources (EKS, AKS, GKE). KubernetesProtection API counts registered K8s clusters. These may differ if a cluster is registered with KubernetesProtection but not yet synced to CSA, or vice versa.',
+          '<strong>"Managed containers" definition differs from "managed pods" in S2/S3.</strong> <code>read_sensor_coverage</code> returns containers where the Falcon sensor is detected at runtime. S2/S3 pod counts are from the Hosts API device registry. The same container may be counted in both or neither depending on timing.',
+      ]
+  )}
+  {_legend([
+      ('K8s Cluster',           'A registered Kubernetes cluster — may be cloud-managed (EKS/AKS/GKE) or self-hosted; visible via cloud integration or direct sensor registration'),
+      ('K8s Node',              'A worker VM inside a cluster that runs pods; may or may not have a Falcon sensor'),
+      ('Pod',                   'A Kubernetes scheduling unit (one or more containers sharing network/storage); counted cluster-wide regardless of sensor'),
+      ('Managed Container',     'A running container where the Falcon sensor has been detected at runtime via read_sensor_coverage'),
+      ('Unmanaged Container',   'Running container with no detected Falcon sensor — full blind spot'),
+      ('KAC',                   'Kubernetes Admission Controller — Falcon webhook that inspects workloads at deploy time'),
+      ('IAR',                   'Image Assessment & Response — Falcon scans container images before they run'),
+  ])}
   {_stat_grid([
       ('Total Containers',       _fmt(total_ctrs),                                              GREY2),
-      ('Containers w/ Falcon',   _fmt(covered_ctrs),                                            GREEN),
-      ('Unprotected Containers', _fmt(unmanaged_ctrs),                                          RED if unmanaged_ctrs else GREY2),
+      ('Managed Containers',     _fmt(covered_ctrs),   GREEN),
+      ('Unmanaged Containers',   _fmt(unmanaged_ctrs), RED if unmanaged_ctrs else GREY2),
       ('K8s Clusters',           _fmt(k8s_inv_summary.get('cluster_count',0)),                  CYAN),
       ('K8s Nodes',              _fmt(k8s_inv_summary.get('node_count',0)),                     CYAN),
       ('Pods',                   _fmt(k8s_inv_summary.get('pod_count',0)),                      CYAN),
@@ -861,8 +1198,8 @@ def build_html(json_path, out_path):
     <div class="gauge-wrap">{_gauge(ctr_pct, 140)}</div>
     {_callout(
         f'Container Coverage: {ctr_pct:.1f}% &nbsp; {_badge(ctr_risk, ctr_color)}',
-        f'{_fmt(covered_ctrs)} of {_fmt(total_ctrs)} containers have the Falcon sensor &nbsp;·&nbsp; '
-        f'{_fmt(unmanaged_ctrs)} containers are unprotected',
+        f'{_fmt(covered_ctrs)} of {_fmt(total_ctrs)} containers are managed &nbsp;·&nbsp; '
+        f'{_fmt(unmanaged_ctrs)} containers are unmanaged',
         ctr_color
     )}
   </div>
@@ -875,13 +1212,7 @@ def build_html(json_path, out_path):
 </section>
 <div class="pb"></div>"""
 
-    # ── S6: UNSUPPORTED (was S5) ───────────────────────────────
-    if '_kac_csv_rows' not in dir():
-        _kac_csv_rows = [['Cluster','Cloud','Region','KAC','IAR','KAC Last Seen','Build']]
-    if '_unmanaged_csv_rows' not in dir():
-        _unmanaged_csv_rows = [['Hostname','Discoverer','Platform','OS Version','IP Address','Cloud Provider','Confidence','Container Signal','First Seen','Last Seen']]
-    if '_unsupported_csv_rows' not in dir():
-        _unsupported_csv_rows = [['Hostname / ID','Platform','OS Version','IP Address','Cloud Provider','Product Type','First Seen','Last Seen']]
+    # ── S6: UNSUPPORTED ────────────────────────────────────────
     unsp      = cov_sum.get('unsupported', {})
     unsp_plat = unsp.get('by_platform', {})
     unsp_prod = unsp.get('by_product_type', {})
@@ -889,6 +1220,24 @@ def build_html(json_path, out_path):
     s6 = f"""
 <section id="s6">
   {_sh(6, "Unsupported Assets (Cannot be Managed)", GREY2)}
+  {_api_panel(
+      apis=['Discover.query_hosts', 'Discover.get_hosts'],
+      logic_items=[
+          'Filter <code>managed_by:\'Not Supported\'</code> returns devices Falcon cannot protect',
+          'These assets are excluded from the sensor coverage denominator in S1',
+          'Includes IoT devices, network infrastructure, and unidentified endpoints',
+      ],
+      fql="managed_by:'Not Supported'",
+      conflicts=[
+          'No deduplication against Hosts API. If an asset transitions from "managed" to "unsupported" (e.g., OS downgrade or product change), it could briefly appear in both the Managed Hosts count (S2) and here due to API sync delay.',
+      ]
+  )}
+  {_legend([
+      ('Unsupported',      'Device Falcon has discovered but cannot protect — no sensor build exists for its OS/product type'),
+      ('managed_by: Not Supported', 'The Discover API field value that identifies these devices; set by Falcon, not manually'),
+      ('Coverage impact',  'These hosts are NOT in the coverage denominator — they do not lower your sensor coverage %'),
+      ('Alternative controls', 'Compensating measures needed: network segmentation, EDR-agnostic monitoring, physical security'),
+  ])}
   <p class="lead"><strong>{_fmt(unsupported)}</strong> assets cannot run the Falcon sensor (IoT devices, network infrastructure, unidentified endpoints). These represent known blind spots that require alternative security controls.</p>
   <div class="two-col">
     {_rank('By Platform', sorted(unsp_plat.items(),key=lambda x:-x[1])[:8], unsupported, GREY3) if unsp_plat else ''}
@@ -897,16 +1246,37 @@ def build_html(json_path, out_path):
 </section>
 <div class="pb"></div>"""
 
-    # ── S7: RECOMMENDATIONS (was S6) ───────────────────────────
+    # ── S7: RECOMMENDATIONS ────────────────────────────────────
     recs = _recommendations(coverage, unmanaged, unsupported, managed, by_stat, gap_by_plat, k8s_total)
     s7 = f"""
 <section id="s7">
   {_sh(7, "Recommendations", RED)}
+  {_api_panel(
+      apis=['(No direct API calls — computed from collected summary data)'],
+      logic_items=[
+          'Threshold rules applied to aggregated summaries from S1&ndash;S6',
+          'coverage &lt; 40% &rarr; CRITICAL; &lt; 70% &rarr; HIGH',
+          'contained &gt; 0 &rarr; HIGH',
+          'unmanaged gap present &rarr; MEDIUM',
+          'unsupported &gt; 1,000 &rarr; MEDIUM',
+          'k8s present &rarr; LOW',
+      ],
+      conflicts=[
+          'Recommendation thresholds are applied to summary counts that themselves may carry conflicts noted in S1&ndash;S6. For example, a "HIGH: Improve Coverage" recommendation triggered at 68% coverage could be an artifact of the Hosts/Discover API overlap inflating the unmanaged count.',
+      ]
+  )}
+  {_legend([
+      ('CRITICAL',    'Coverage below 40% — immediate action required'),
+      ('HIGH',        'Coverage 40–69%, or hosts actively contained — urgent remediation'),
+      ('MEDIUM',      'Unmanaged gap present, or >1,000 unsupported assets — planned remediation'),
+      ('LOW',         'Kubernetes workloads detected — review KAC / IAR deployment'),
+      ('Threshold',   'Severity is rule-based on the numbers above; it is not a risk score or weighted model'),
+  ])}
   <div class="recs">{''.join(_rec(p,t,b) for p,t,b in recs)}</div>
 </section>
 <div class="pb"></div>"""
 
-    # ── S8: APPENDIX (was S7) ──────────────────────────────────
+    # ── S8: APPENDIX ───────────────────────────────────────────
     IS_CLOUD = {'AWS_EC2_V2','AWS_EC2','AWS_EKS_FARGATE','AWS_ECS_FARGATE',
                 'AZURE','AZURE_CONTAINER_APPS','GCP'}
     unmanaged_records = gaps.get('unmanaged', [])
@@ -1004,8 +1374,30 @@ def build_html(json_path, out_path):
     s8 = f"""
 <section id="s8">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px">
-    {_sh(8, f"Appendix — Asset Detail Lists", ORANGE)}
+    {_sh(8, "Appendix — Asset Detail Lists", ORANGE)}
   </div>
+  {_api_panel(
+      apis=['Discover.query_hosts', 'Discover.get_hosts'],
+      logic_items=[
+          'Full dump of <code>coverage_gaps</code> JSON from inventory collection',
+          'Amber row = cloud-hosted unmanaged asset (<code>service_provider</code> in cloud set)',
+          'Container signal heuristic from <code>resource_id</code>, <code>hostname</code>, <code>os_version</code> fields',
+          'Unmanaged list: <code>managed_by</code> not "Supported" and not "Not Supported"',
+          'Unsupported list: <code>managed_by:\'Not Supported\'</code>',
+      ],
+      fql="managed_by:!'Supported' (unmanaged) / managed_by:'Not Supported' (unsupported)",
+      conflicts=[
+          'These lists are sourced entirely from the Discover API and are <strong>not cross-referenced against the Hosts API</strong>. A host appearing in the unmanaged list may already be managed (sensor installed) but not yet de-listed from Discover due to API sync delay. Confirming sensor deployment for a listed host requires checking the Hosts API separately.',
+      ]
+  )}
+  {_legend([
+      ('Unmanaged (amber)',   'Host discovered by Falcon with no sensor; amber row = cloud-hosted; these can accept a sensor'),
+      ('Unsupported (grey)',  'Host that cannot run the Falcon sensor at all — IoT, network device, or unsupported OS'),
+      ('Discoverer',          'The Falcon-managed host that detected this unmanaged asset via network scan or ARP'),
+      ('Confidence',          'Falcon\'s confidence score for the asset discovery — higher = more reliable identification'),
+      ('Container signal',    'Heuristic flag: hostname, resource_id, or OS version pattern suggests this is a container'),
+      ('Sync lag',            'Asset may already be managed in the Hosts API but not yet removed from Discover — verify before deploying sensors'),
+  ])}
   <div style="display:flex;gap:8px;margin-bottom:4px">
     <a href="#s8-unmanaged" style="font-size:11px;padding:3px 10px;border-radius:3px;background:#FFF3E0;color:{ORANGE};text-decoration:none;font-weight:600">&#9660; Unmanaged ({_fmt(unmanaged)})</a>
     <a href="#s8-unsupported" style="font-size:11px;padding:3px 10px;border-radius:3px;background:#F5F5F5;color:{GREY2};text-decoration:none;font-weight:600">&#9660; Unsupported ({_fmt(unsupported)})</a>
@@ -1085,13 +1477,11 @@ def build_html(json_path, out_path):
         f'CONFIDENTIAL — authorized personnel only</footer>'
     )
 
-    _csa_csv_rows_final = locals().get('_csa_csv_rows',
-        [['Asset Type','Resource ID','Resource Name','Account ID','Region','Status']])
-
     _js_data = json.dumps({
         'unmanaged_assets':   {'filename': 'unmanaged_assets.csv',      'rows': _unmanaged_csv_rows},
         'kac_clusters':       {'filename': 'kac_iar_clusters.csv',       'rows': _kac_csv_rows},
-        'csa_unprotected':    {'filename': 'csa_unprotected_assets.csv', 'rows': _csa_csv_rows_final},
+        'csa_unprotected':    {'filename': 'csa_unprotected_assets.csv', 'rows': _csa_csv_rows},
+        'csa_managed_assets': {'filename': 'csa_managed_assets.csv',     'rows': _csa_mgd_csv_rows},
         'unsupported_assets': {'filename': 'unsupported_assets.csv',     'rows': _unsupported_csv_rows},
     }, ensure_ascii=False)
 

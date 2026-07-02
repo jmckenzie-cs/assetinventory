@@ -905,13 +905,20 @@ def _csa_k8s_cluster_sensor_counts(h: Hosts) -> dict:
     det = h.get_device_details(ids=kac_ids)
     kac_resources = (det.get("body") or {}).get("resources") or []
 
+    # Deduplicate by k8s_cluster_id per cloud — a cluster with multiple KAC host
+    # records (e.g. duplicate device registrations) must only be counted once.
+    seen: set = set()
     counts = {"aws": 0, "azure": 0, "gcp": 0}
     for kac_host in kac_resources:
-        sp          = kac_host.get("service_provider") or ""
-        cloud       = _CSA_SP_TO_CLOUD.get(sp)
+        sp           = kac_host.get("service_provider") or ""
+        cloud        = _CSA_SP_TO_CLOUD.get(sp)
         cluster_uuid = kac_host.get("k8s_cluster_id")
         if not cloud or not cluster_uuid:
             continue
+        dedup_key = (cloud, cluster_uuid)
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
         r = h.query_devices_by_filter(filter=f"k8s_cluster_id:'{cluster_uuid}'", limit=1)
         if r["status_code"] == 200 and _csa_total(r) > 0:
             counts[cloud] += 1
@@ -934,9 +941,10 @@ def _csa_k8s_cluster_row(csa: CloudSecurityAssets, asset_type: dict, with_sensor
         total = with_sensors
 
     without  = max(0, total - with_sensors)
-    coverage = round(with_sensors / total * 100, 1) if total > 0 else 0.0
+    effective = min(with_sensors, total)
+    coverage = round(effective / total * 100, 1) if total > 0 else 0.0
     return {"name": asset_type["name"], "total_count": total,
-            "with_sensors": min(with_sensors, total), "without_sensors": without,
+            "with_sensors": effective, "without_sensors": without,
             "coverage_rate": coverage, "estimated": False, "errors": errors}
 
 
@@ -960,10 +968,20 @@ def _csa_k8s_kac_counts(csa: CloudSecurityAssets, h: Hosts) -> dict:
                             "errors": (resp.get("body") or {}).get("errors")})
 
     resp_kac = h.query_devices_by_filter(
-        filter="product_type_desc:'Kubernetes Cluster'", limit=1
+        filter="product_type_desc:'Kubernetes Cluster'", limit=100
     )
     if resp_kac["status_code"] == 200:
-        kac_count = _csa_total(resp_kac)
+        kac_ids = (resp_kac.get("body") or {}).get("resources") or []
+        if kac_ids:
+            det = h.get_device_details(ids=kac_ids)
+            seen_ids: set = set()
+            for host in (det.get("body") or {}).get("resources") or []:
+                cid = host.get("k8s_cluster_id")
+                if cid:
+                    seen_ids.add(cid)
+            kac_count = len(seen_ids)
+        else:
+            kac_count = 0
     else:
         kac_count = 0
         if sum(csa_totals.values()) > 0:
@@ -993,6 +1011,25 @@ def _csa_k8s_kac_counts(csa: CloudSecurityAssets, h: Hosts) -> dict:
     coverage = round(kac_count / total * 100, 1) if total > 0 else 0.0
     return {"name": "K8s Clusters with KAC", "total_count": total, "with_sensors": kac_count,
             "without_sensors": without, "coverage_rate": coverage, "estimated": False, "errors": errors}
+
+
+def _csa_get_managed_assets(csa: CloudSecurityAssets, fql: str, cap: int = 500) -> dict:
+    """Return up to cap assets that have a Falcon sensor for a given FQL filter."""
+    ids   = _csa_get_all_ids(csa, fql + _CSA_SENSOR_FQL)
+    total = len(ids)
+    fetch_ids = ids[:cap]
+    assets = []
+    for i in range(0, len(fetch_ids), 100):
+        resp = csa.get_assets(ids=fetch_ids[i:i + 100])
+        for r in (resp.get("body") or {}).get("resources") or []:
+            assets.append({
+                "resource_id":   r.get("resource_id"),
+                "resource_name": r.get("resource_name"),
+                "account_id":    r.get("account_id"),
+                "region":        r.get("region"),
+                "status":        r.get("status"),
+            })
+    return {"assets": assets, "total": total, "shown": len(assets)}
 
 
 def _csa_get_unprotected_assets(csa: CloudSecurityAssets, fql: str, cap: int = 500) -> dict:
@@ -1035,6 +1072,38 @@ def _csa_get_unpatched_task_defs(csa: CloudSecurityAssets, cap: int = 500) -> di
     return {"assets": unpatched[:cap], "total": total, "shown": min(total, cap)}
 
 
+def _csa_k8s_cluster_name(asset: dict) -> str:
+    """Normalise a CSA cluster asset to a bare cluster name for KAC hostname matching.
+
+    AWS EKS clusters often have resource_name=None; their resource_id is the plain
+    cluster name (e.g. 'bp-test-falcon-eks').  Azure resource_ids are full ARM paths;
+    resource_name is populated.  Splitting on '/' and taking the last segment handles
+    both cases and also matches the Hosts API ARN-format hostnames.
+    """
+    raw = asset.get("resource_name") or asset.get("resource_id") or ""
+    return raw.split("/")[-1].lower()
+
+
+def _csa_k8s_kac_names(h: Hosts, k8s_cloud: str) -> set:
+    """Return lowercase cluster names that have a KAC-registered host for this cloud."""
+    resp_h = h.query_devices_by_filter(
+        filter="product_type_desc:'Kubernetes Cluster'", limit=100
+    )
+    kac_names: set = set()
+    if resp_h["status_code"] == 200:
+        kac_ids = (resp_h.get("body") or {}).get("resources") or []
+        if kac_ids:
+            det = h.get_device_details(ids=kac_ids)
+            for host in (det.get("body") or {}).get("resources") or []:
+                sp = host.get("service_provider") or ""
+                if _CSA_SP_TO_CLOUD.get(sp) != k8s_cloud:
+                    continue
+                hn   = host.get("hostname") or ""
+                name = hn.split("/")[-1].lower() if "/" in hn else hn.lower()
+                kac_names.add(name)
+    return kac_names
+
+
 def _csa_get_k8s_cluster_assets(csa: CloudSecurityAssets, h: Hosts,
                                  fql: str, k8s_cloud: str) -> dict:
     """Return CSA cluster entities that do NOT have KAC, via hostname correlation."""
@@ -1051,29 +1120,38 @@ def _csa_get_k8s_cluster_assets(csa: CloudSecurityAssets, h: Hosts,
                 "status":        None,
             })
 
-    # Build set of cluster names that have KAC for this cloud
-    resp_h   = h.query_devices_by_filter(
-        filter="product_type_desc:'Kubernetes Cluster'", limit=100
-    )
-    kac_names = set()
-    if resp_h["status_code"] == 200:
-        kac_ids = (resp_h.get("body") or {}).get("resources") or []
-        if kac_ids:
-            det = h.get_device_details(ids=kac_ids)
-            for host in (det.get("body") or {}).get("resources") or []:
-                sp = host.get("service_provider") or ""
-                if _CSA_SP_TO_CLOUD.get(sp) != k8s_cloud:
-                    continue
-                hn   = host.get("hostname") or ""
-                name = hn.split("/")[-1].lower() if "/" in hn else hn.lower()
-                kac_names.add(name)
-
+    kac_names = _csa_k8s_kac_names(h, k8s_cloud)
     unprotected = [
         a for a in assets
-        if (a.get("resource_name") or "").lower() not in kac_names
+        if _csa_k8s_cluster_name(a) not in kac_names
     ]
     total = len(unprotected)
     return {"assets": unprotected, "total": total, "shown": total}
+
+
+def _csa_get_k8s_managed_assets(csa: CloudSecurityAssets, h: Hosts,
+                                  fql: str, k8s_cloud: str) -> dict:
+    """Return CSA cluster entities that DO have KAC, via hostname correlation."""
+    ids    = _csa_get_all_ids(csa, fql)
+    assets = []
+    for i in range(0, len(ids), 100):
+        resp = csa.get_assets(ids=ids[i:i + 100])
+        for r in (resp.get("body") or {}).get("resources") or []:
+            assets.append({
+                "resource_id":   r.get("resource_id"),
+                "resource_name": r.get("resource_name"),
+                "account_id":    r.get("account_id"),
+                "region":        r.get("region"),
+                "status":        None,
+            })
+
+    kac_names = _csa_k8s_kac_names(h, k8s_cloud)
+    managed = [
+        a for a in assets
+        if _csa_k8s_cluster_name(a) in kac_names
+    ]
+    total = len(managed)
+    return {"assets": managed, "total": total, "shown": total}
 
 
 def collect_csa_coverage(csa: CloudSecurityAssets, h: Hosts) -> dict:
@@ -1134,7 +1212,14 @@ def collect_csa_coverage(csa: CloudSecurityAssets, h: Hosts) -> dict:
         if name == "AWS ECS Task Definitions":
             details[name] = _csa_get_unpatched_task_defs(csa)
         elif k8s_cloud and at:
-            details[name] = _csa_get_k8s_cluster_assets(csa, h, at["fql"], k8s_cloud)
+            raw = _csa_get_k8s_cluster_assets(csa, h, at["fql"], k8s_cloud)
+            # Use the row's authoritative without_sensors count so the drilldown total
+            # matches the table.  Name-matching can over-count unmanaged when some KAC
+            # cluster hostnames differ from their CSA resource_id; trim the asset list
+            # to the authoritative count so neither the total nor the list over-reports.
+            auth_without = row.get("without_sensors", raw["total"])
+            trimmed = raw["assets"][:auth_without]
+            details[name] = {"assets": trimmed, "total": auth_without, "shown": len(trimmed)}
         elif at:
             details[name] = _csa_get_unprotected_assets(csa, at["fql"])
         else:
@@ -1144,7 +1229,37 @@ def collect_csa_coverage(csa: CloudSecurityAssets, h: Hosts) -> dict:
         total = details[name].get("total", 0)
         print(f"    {name}: {shown:,} shown of {total:,} unprotected")
 
-    return {"total_assets": total_assets, "rows": rows, "details": details}
+    # Pre-fetch managed asset details (up to 500 per type)
+    print("  → managed cloud asset details …")
+    managed_details: dict = {}
+    for row in rows:
+        name = row["name"]
+        if name == "K8s Clusters with KAC":
+            continue
+        at        = type_map.get(name)
+        k8s_cloud = at.get("k8s_cloud") if at else None
+        if not at:
+            managed_details[name] = {"assets": [], "total": 0, "shown": 0}
+            continue
+        if row.get("with_sensors", 0) == 0:
+            managed_details[name] = {"assets": [], "total": 0, "shown": 0}
+            continue
+        if k8s_cloud:
+            raw = _csa_get_k8s_managed_assets(csa, h, at["fql"], k8s_cloud)
+            # Use the row's authoritative with_sensors count for the total so the
+            # drilldown summary matches the table.  The assets list contains only the
+            # clusters that could be identified by name; unresolvable ones are noted
+            # in the report's methodology note.
+            auth_with = row.get("with_sensors", raw["total"])
+            managed_details[name] = {"assets": raw["assets"], "total": auth_with, "shown": raw["shown"]}
+        else:
+            managed_details[name] = _csa_get_managed_assets(csa, at["fql"])
+        shown = managed_details[name].get("shown", 0)
+        total = managed_details[name].get("total", 0)
+        print(f"    {name}: {shown:,} shown of {total:,} managed")
+
+    return {"total_assets": total_assets, "rows": rows, "details": details,
+            "managed_details": managed_details}
 
 
 def _host_container_status(h: dict) -> str:
