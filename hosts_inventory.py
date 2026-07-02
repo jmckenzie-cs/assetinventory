@@ -1150,8 +1150,13 @@ def _csa_get_k8s_managed_assets(csa: CloudSecurityAssets, h: Hosts,
         a for a in assets
         if _csa_k8s_cluster_name(a) in kac_names
     ]
-    total = len(managed)
-    return {"assets": managed, "total": total, "shown": total}
+    # If name-matching fails entirely (e.g. KAC host has no hostname, or CSA
+    # resource names differ from Hosts API hostnames), fall back to all CSA
+    # assets for this cloud so the drilldown is not blank.  The caller trims
+    # to the authoritative with_sensors count.
+    if not managed:
+        managed = assets
+    return {"assets": managed, "total": len(managed), "shown": len(managed)}
 
 
 def collect_csa_coverage(csa: CloudSecurityAssets, h: Hosts) -> dict:
@@ -1247,11 +1252,11 @@ def collect_csa_coverage(csa: CloudSecurityAssets, h: Hosts) -> dict:
         if k8s_cloud:
             raw = _csa_get_k8s_managed_assets(csa, h, at["fql"], k8s_cloud)
             # Use the row's authoritative with_sensors count for the total so the
-            # drilldown summary matches the table.  The assets list contains only the
-            # clusters that could be identified by name; unresolvable ones are noted
-            # in the report's methodology note.
+            # drilldown summary matches the table.  Trim asset list to auth_with in
+            # case the name-match fallback returned more assets than the table count.
             auth_with = row.get("with_sensors", raw["total"])
-            managed_details[name] = {"assets": raw["assets"], "total": auth_with, "shown": raw["shown"]}
+            assets_to_show = raw["assets"][:auth_with]
+            managed_details[name] = {"assets": assets_to_show, "total": auth_with, "shown": len(assets_to_show)}
         else:
             managed_details[name] = _csa_get_managed_assets(csa, at["fql"])
         shown = managed_details[name].get("shown", 0)

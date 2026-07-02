@@ -873,16 +873,23 @@ def build_html(json_path, out_path):
                     a.get('region') or '',
                     a.get('status') or '',
                 ])
-            cap_note = (f'<p style="font-size:11px;color:{GREY3};margin:4px 0 6px 0">'
-                        f'Showing first {_fmt(shown_d)} of {_fmt(total_d)}</p>') if total_d > shown_d else ''
-            tbl = _table(
-                ['Resource ID','Name','Account','Region','Status'],
-                [[f'<span class="mono">{a.get("resource_id") or "—"}</span>',
-                  a.get('resource_name') or '—',
-                  a.get('account_id') or '—',
-                  a.get('region') or '—',
-                  a.get('status') or '—'] for a in assets],
-            )
+            if shown_d == 0:
+                tbl = (f'<p style="font-size:11px;color:{GREY3};margin:6px 0 4px 0">'
+                       f'{_fmt(total_d)} cluster(s) confirmed managed via KAC sensor '
+                       f'registration. Resource details not available — no matching records '
+                       f'found in the CSA inventory for this asset type.</p>')
+                cap_note = ''
+            else:
+                cap_note = (f'<p style="font-size:11px;color:{GREY3};margin:4px 0 6px 0">'
+                            f'Showing first {_fmt(shown_d)} of {_fmt(total_d)}</p>') if total_d > shown_d else ''
+                tbl = _table(
+                    ['Resource ID','Name','Account','Region','Status'],
+                    [[f'<span class="mono">{a.get("resource_id") or "—"}</span>',
+                      a.get('resource_name') or '—',
+                      a.get('account_id') or '—',
+                      a.get('region') or '—',
+                      a.get('status') or '—'] for a in assets],
+                )
             _csa_mgd_drilldown += (
                 f'<details class="csa-details">'
                 f'<summary>{name} — {_fmt(total_d)} managed</summary>'
