@@ -234,6 +234,7 @@ _CLOUD_PROVIDERS = {
     "AWS_EC2_V2", "AWS_EC2", "AWS_EKS_FARGATE", "AWS_ECS_FARGATE",
     "AZURE", "AZURE_CONTAINER_APPS",
     "GCP",
+    "OCI",
 }
 
 
@@ -751,13 +752,15 @@ _CSA_ASSET_TYPES = [
      "fql":  "cloud_provider:'azure'+resource_type:'Microsoft.Compute/virtualMachines'+active:true"},
     {"name": "GCP Compute Instances",
      "fql":  "cloud_provider:'gcp'+resource_type:'compute.googleapis.com/Instance'+active:true"},
-    {"name": "K8s Clusters AWS",
+    {"name": "OCI Compute Instances",
+     "fql":  "cloud_provider:'oci'+active:true"},
+    {"name": "K8s Clusters in AWS w/ KAC",
      "fql":  "cloud_provider:'aws'+resource_type:'AWS::EKS::Cluster'+active:true",
      "k8s_cloud": "aws"},
-    {"name": "K8s Clusters Azure",
+    {"name": "K8s Clusters in Azure w/ KAC",
      "fql":  "cloud_provider:'azure'+resource_type:'Microsoft.ContainerService/managedClusters'+active:true",
      "k8s_cloud": "azure"},
-    {"name": "K8s Clusters GCP",
+    {"name": "K8s Clusters in GCP w/ KAC",
      "fql":  "cloud_provider:'gcp'+resource_type:'container.googleapis.com/Cluster'+active:true",
      "k8s_cloud": "gcp"},
 ]
@@ -770,6 +773,7 @@ _CSA_SP_TO_CLOUD = {
     "AWS_EC2_V2": "aws",
     "AZURE":      "azure",
     "GCP":        "gcp",
+    "OCI":        "oci",
     "":           "azure",
 }
 
