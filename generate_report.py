@@ -1003,20 +1003,24 @@ def build_html(json_path, out_path):
     <tbody>{_csa_table_rows}</tbody>
   </table>
   {_csa_notes}
-  <div class="sub-t" style="margin-top:20px">
-    Unmanaged Assets
-    <button class="export-btn" onclick="exportCSV('csa_unprotected')" style="float:right;margin-top:-2px">&#8595; Export CSV</button>
-  </div>
-  {_csa_drilldown if _csa_drilldown else '<p class="note">No unmanaged cloud assets found.</p>'}
-  <div class="sub-t" style="margin-top:20px">
-    Managed Assets
-    <button class="export-btn" onclick="exportCSV('csa_managed_assets')" style="float:right;margin-top:-2px">&#8595; Export CSV</button>
-  </div>
-  <p class="note">Per-asset drilldown for cloud resources with a Falcon sensor detected via <code>managed_by:'Sensor'</code>. &nbsp;
-    <strong>AWS ECS Task Definitions</strong> are excluded — their coverage is determined by container config inspection (image name / env vars / volume mounts), not the <code>managed_by</code> field, so a per-asset list is not available here. &nbsp;
-    <strong>K8s cluster</strong> managed lists are derived from Hosts API hostname correlation and may be incomplete where CSA cluster names differ from Hosts API hostnames.
-  </p>
-  {_csa_mgd_drilldown if _csa_mgd_drilldown else '<p class="note">No managed cloud asset details available.</p>'}"""
+  <details style="margin-top:20px">
+    <summary style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;list-style:none;margin-bottom:4px">
+      <span class="sub-t" style="margin:0">&#9654; Unmanaged Assets</span>
+      <button class="export-btn" onclick="event.stopPropagation();exportCSV('csa_unprotected')" style="margin-top:0">&#8595; Export CSV</button>
+    </summary>
+    {_csa_drilldown if _csa_drilldown else '<p class="note">No unmanaged cloud assets found.</p>'}
+  </details>
+  <details style="margin-top:12px">
+    <summary style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;list-style:none;margin-bottom:4px">
+      <span class="sub-t" style="margin:0">&#9654; Managed Assets</span>
+      <button class="export-btn" onclick="event.stopPropagation();exportCSV('csa_managed_assets')" style="margin-top:0">&#8595; Export CSV</button>
+    </summary>
+    <p class="note">Per-asset drilldown for cloud resources with a Falcon sensor detected via <code>managed_by:'Sensor'</code>. &nbsp;
+      <strong>AWS ECS Task Definitions</strong> are excluded — their coverage is determined by container config inspection (image name / env vars / volume mounts), not the <code>managed_by</code> field, so a per-asset list is not available here. &nbsp;
+      <strong>K8s cluster</strong> managed lists are derived from Hosts API hostname correlation and may be incomplete where CSA cluster names differ from Hosts API hostnames.
+    </p>
+    {_csa_mgd_drilldown if _csa_mgd_drilldown else '<p class="note">No managed cloud asset details available.</p>'}
+  </details>"""
 
     # ── S5 → now K8s subsection of S4 ──────────────────────────
     _kac_csv_rows = [['Cluster','Cloud','Region','KAC','IAR','KAC Last Seen','Build']]
