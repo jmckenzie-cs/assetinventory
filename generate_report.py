@@ -1209,24 +1209,27 @@ def build_html(json_path, out_path):
 
         nodes_tbl = ''
         if display_nodes:
-            nodes_tbl = (
-                '<div class="sub-t">Active K8s Nodes</div>'
-                + _table(
-                    ['Node','Cluster','Cloud','Region','Runtime','Sensor'],
+            _nodes_inner = _table(
+                ['Node','Cluster','Cloud','Region','Runtime','Sensor'],
+                [
                     [
-                        [
-                            f'<span class="mono" title="{n.get("node_name") or ""}">{n.get("node_name") or ""}</span>',
-                            (n.get('cluster_name') or '')[:30],
-                            n.get('cloud_name') or '—',
-                            (n.get('cloud_region') or '—')[:18],
-                            (n.get('container_runtime_version') or '—').split('://')[0],
-                            f'<span style="color:{GREEN};font-weight:700">✓</span>' if n.get('linux_sensor_coverage')
-                            else f'<span style="color:{RED};font-weight:700">✗</span>',
-                        ]
-                        for n in display_nodes
-                    ],
-                    col_align={2:'center',3:'center',5:'center'}
-                )
+                        f'<span class="mono" title="{n.get("node_name") or ""}">{n.get("node_name") or ""}</span>',
+                        (n.get('cluster_name') or '')[:30],
+                        n.get('cloud_name') or '—',
+                        (n.get('cloud_region') or '—')[:18],
+                        (n.get('container_runtime_version') or '—').split('://')[0],
+                        f'<span style="color:{GREEN};font-weight:700">✓</span>' if n.get('linux_sensor_coverage')
+                        else f'<span style="color:{RED};font-weight:700">✗</span>',
+                    ]
+                    for n in display_nodes
+                ],
+                col_align={2:'center',3:'center',5:'center'}
+            )
+            nodes_tbl = (
+                f'<details><summary class="sub-t" style="cursor:pointer">'
+                f'Active K8s Nodes (showing {len(display_nodes)} of {len(active_nodes)})</summary>'
+                + _nodes_inner
+                + '</details>'
             )
 
         # ── KAC / IAR coverage ──────────────────────────────────
@@ -1356,7 +1359,7 @@ def build_html(json_path, out_path):
       {_kac_gap_tbl if _kac_gap_tbl else '<p class="note">No gap clusters.</p>'}
     </div>
   </div>
-  {'<div class="sub-t" style="font-size:11px;margin-top:16px;margin-bottom:8px">KAC Agent Build Versions</div>' + _kac_build_tbl if _kac_build_tbl else ''}
+  {f'<details style="margin-top:16px"><summary class="sub-t" style="font-size:11px;margin-bottom:8px;cursor:pointer">KAC Agent Build Versions ({len(_build_rows)} builds)</summary>{_kac_build_tbl}</details>' if _kac_build_tbl else ''}
   {'<div style="display:flex;align-items:center;justify-content:space-between;margin-top:20px;margin-bottom:8px"><span class="sub-t" style="font-size:11px;margin:0">Clusters with KAC / IAR Deployed</span><button class="export-btn" onclick="exportCSV(\'kac_clusters\')">&#8595; Export CSV</button></div>' + _kac_cluster_tbl if _kac_cluster_tbl else ''}
 """
 
