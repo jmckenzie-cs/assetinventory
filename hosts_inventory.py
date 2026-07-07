@@ -863,16 +863,39 @@ def _csa_get_asset_counts(csa: CloudSecurityAssets, asset_type: dict) -> dict:
             "without_sensors": without, "coverage_rate": coverage, "estimated": False, "errors": errors}
 
 
-def _csa_get_ecs_task_def_counts(csa: CloudSecurityAssets) -> dict:
-    """Count patched/unpatched ECS task definitions by inspecting container config."""
+def _ecs_td_parse_arn(resource_id: str) -> tuple:
+    """Extract (family, revision) from a task definition ARN.
+
+    arn:aws:ecs:<region>:<account>:task-definition/<family>:<revision>
+    Returns ('', 0) if the ARN does not match the expected pattern.
+    """
+    try:
+        tail = (resource_id or "").split("/", 1)[1]   # 'my-family:6'
+        family, rev = tail.rsplit(":", 1)
+        return family, int(rev)
+    except (IndexError, ValueError):
+        return resource_id or "", 0
+
+
+def _csa_get_ecs_task_def_counts(csa: CloudSecurityAssets) -> tuple:
+    """Count patched/unpatched ECS task definitions and build per-family latest-version summary.
+
+    Returns (row_dict, family_summary_list) where family_summary_list is sorted by
+    family name and each entry has:
+        family, latest_revision, latest_patched, account_id, region
+    """
     ids         = _csa_get_all_ids(csa, "resource_type:'AWS::ECS::TaskDefinition'")
     total_count = len(ids)
+    empty_row   = {"name": "AWS ECS Task Definitions", "total_count": 0, "with_sensors": 0,
+                   "without_sensors": 0, "coverage_rate": 0.0, "estimated": False, "errors": []}
     if not total_count:
-        return {"name": "AWS ECS Task Definitions", "total_count": 0, "with_sensors": 0,
-                "without_sensors": 0, "coverage_rate": 0.0, "estimated": False, "errors": []}
+        return empty_row, []
 
     patched    = 0
     api_errors = []
+    # family → {"latest_revision": int, "latest_patched": bool, "account_id": str, "region": str}
+    families: dict = {}
+
     for i in range(0, len(ids), 100):
         resp = csa.get_assets(ids=ids[i:i + 100])
         if resp["status_code"] != 200:
@@ -880,13 +903,30 @@ def _csa_get_ecs_task_def_counts(csa: CloudSecurityAssets) -> dict:
                                 "errors": (resp.get("body") or {}).get("errors")})
             continue
         for r in (resp.get("body") or {}).get("resources") or []:
-            if _csa_is_falcon_patched(r.get("configuration", "")):
+            is_patched = _csa_is_falcon_patched(r.get("configuration", ""))
+            if is_patched:
                 patched += 1
+
+            family, revision = _ecs_td_parse_arn(r.get("resource_id") or "")
+            if not family:
+                continue
+            existing = families.get(family)
+            if existing is None or revision > existing["latest_revision"]:
+                families[family] = {
+                    "family":           family,
+                    "latest_revision":  revision,
+                    "latest_patched":   is_patched,
+                    "account_id":       r.get("account_id") or "",
+                    "region":           r.get("region") or "",
+                }
 
     without  = total_count - patched
     coverage = round(patched / total_count * 100, 1) if total_count > 0 else 0.0
-    return {"name": "AWS ECS Task Definitions", "total_count": total_count, "with_sensors": patched,
-            "without_sensors": without, "coverage_rate": coverage, "estimated": False, "errors": api_errors}
+    row      = {"name": "AWS ECS Task Definitions", "total_count": total_count,
+                "with_sensors": patched, "without_sensors": without,
+                "coverage_rate": coverage, "estimated": False, "errors": api_errors}
+    summary  = sorted(families.values(), key=lambda x: x["family"])
+    return row, summary
 
 
 def _csa_k8s_cluster_sensor_counts(h: Hosts) -> dict:
@@ -1076,6 +1116,44 @@ def _csa_get_unpatched_task_defs(csa: CloudSecurityAssets, cap: int = 500) -> di
     return {"assets": unpatched[:cap], "total": total, "shown": min(total, cap)}
 
 
+def _csa_get_ecs_cluster_summary(csa: CloudSecurityAssets) -> list:
+    """Return per-cluster task counts (managed vs unmanaged) for AWS ECS Tasks.
+
+    Cluster name is extracted from the task ARN:
+        arn:aws:ecs:<region>:<account>:task/<cluster>/<task-id>
+    """
+    fql           = "resource_type:'AWS::ECS::Task'+active:true"
+    all_ids       = _csa_get_all_ids(csa, fql)
+    sensor_id_set = set(_csa_get_all_ids(csa, fql + _CSA_SENSOR_FQL))
+    unmanaged_ids = [i for i in all_ids if i not in sensor_id_set]
+    managed_ids   = [i for i in all_ids if i in sensor_id_set]
+
+    clusters: dict = {}
+
+    def _cluster_from_arn(resource_id: str) -> str:
+        # arn:aws:ecs:<region>:<account>:task/<cluster>/<task-id>
+        parts = (resource_id or "").split("/")
+        return parts[1] if len(parts) >= 3 else (resource_id or "unknown")
+
+    def _tally(ids: list, managed: bool) -> None:
+        key = "managed" if managed else "unmanaged"
+        for i in range(0, len(ids), 100):
+            resp = csa.get_assets(ids=ids[i:i + 100])
+            for r in (resp.get("body") or {}).get("resources") or []:
+                cluster = _cluster_from_arn(r.get("resource_id") or "")
+                account = r.get("account_id") or ""
+                region  = r.get("region") or ""
+                if cluster not in clusters:
+                    clusters[cluster] = {"cluster": cluster, "account_id": account,
+                                         "region": region, "managed": 0, "unmanaged": 0}
+                clusters[cluster][key] += 1
+
+    _tally(managed_ids, True)
+    _tally(unmanaged_ids, False)
+
+    return sorted(clusters.values(), key=lambda x: x["cluster"])
+
+
 def _csa_k8s_cluster_name(asset: dict) -> str:
     """Normalise a CSA cluster asset to a bare cluster name for KAC hostname matching.
 
@@ -1192,7 +1270,7 @@ def collect_csa_coverage(csa: CloudSecurityAssets, h: Hosts) -> dict:
         total_assets += row["total_count"]
 
     # ECS Task Definitions: insert after ECS Tasks (index 2)
-    ecs_td_row = _csa_get_ecs_task_def_counts(csa)
+    ecs_td_row, ecs_td_family_summary = _csa_get_ecs_task_def_counts(csa)
     rows.insert(2, ecs_td_row)
     total_assets += ecs_td_row["total_count"]
 
@@ -1267,8 +1345,14 @@ def collect_csa_coverage(csa: CloudSecurityAssets, h: Hosts) -> dict:
         total = managed_details[name].get("total", 0)
         print(f"    {name}: {shown:,} shown of {total:,} managed")
 
+    print("  → ECS cluster breakdown …")
+    ecs_cluster_summary = _csa_get_ecs_cluster_summary(csa)
+    print(f"    {len(ecs_cluster_summary)} ECS cluster(s) found")
+
     return {"total_assets": total_assets, "rows": rows, "details": details,
-            "managed_details": managed_details}
+            "managed_details": managed_details,
+            "ecs_cluster_summary": ecs_cluster_summary,
+            "ecs_task_def_family_summary": ecs_td_family_summary}
 
 
 def _host_container_status(h: dict) -> str:

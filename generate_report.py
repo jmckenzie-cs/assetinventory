@@ -626,8 +626,8 @@ def build_html(json_path, out_path):
     )
 
     s1 = f"""
-<section id="s1">
-  {_sh(1, "Cloud &amp; K8s Sensor Coverage")}
+<section id="s2">
+  {_sh(2, "Cloud &amp; K8s Sensor Coverage")}
   {_api_panel(
       apis=['Discover.query_hosts', 'Discover.get_hosts', 'Hosts.query_devices_by_filter_scroll'],
       logic_items=[
@@ -702,8 +702,8 @@ def build_html(json_path, out_path):
     )
 
     s2 = f"""
-<section id="s2">
-  {_sh(2, "Managed Hosts (Falcon Protected)")}
+<section id="s3">
+  {_sh(3, "Managed Hosts (Falcon Protected)")}
   {_api_panel(
       apis=['Hosts.query_devices_by_filter_scroll', 'Hosts.get_device_details', 'Hosts.get_online_state'],
       logic_items=[
@@ -761,8 +761,8 @@ def build_html(json_path, out_path):
     cloud_pct   = cloud_total / managed * 100 if managed else 0
 
     s3 = f"""
-<section id="s3">
-  {_sh(3, "Cloud & Kubernetes Coverage", CYAN)}
+<section id="s4">
+  {_sh(4, "Cloud & Kubernetes Coverage", CYAN)}
   {_api_panel(
       apis=['Hosts.query_devices_by_filter (cloud hosts)', 'Hosts.query_devices_by_filter (K8s pods)'],
       logic_items=[
@@ -804,10 +804,12 @@ def build_html(json_path, out_path):
     _cspm_block = ''
     s4_csa = ''  # legacy alias; merged into s4 below
     if csa_cov and csa_cov.get('rows'):
-        csa_rows         = csa_cov.get('rows', [])
-        csa_details      = csa_cov.get('details', {})
-        csa_mgd_details  = csa_cov.get('managed_details', {})
-        csa_total_a      = csa_cov.get('total_assets', 0)
+        csa_rows                  = csa_cov.get('rows', [])
+        csa_details               = csa_cov.get('details', {})
+        csa_mgd_details           = csa_cov.get('managed_details', {})
+        csa_total_a               = csa_cov.get('total_assets', 0)
+        ecs_cluster_summary       = csa_cov.get('ecs_cluster_summary', [])
+        ecs_td_family_summary     = csa_cov.get('ecs_task_def_family_summary', [])
 
         # Overall coverage: sum(with_sensors) / sum(total) for non-KAC rows
         _csa_non_kac = [r for r in csa_rows if r.get('name') != 'K8s Clusters with KAC']
@@ -819,13 +821,17 @@ def build_html(json_path, out_path):
 
         # Coverage table rows
         _csa_display_names = {
-            'K8s Clusters with KAC':       'K8s Clusters (cloud-registered)',
-            'K8s Clusters in AWS w/ KAC':  'K8s Clusters — AWS (cloud-registered)',
-            'K8s Clusters in Azure w/ KAC':'K8s Clusters — Azure (cloud-registered)',
-            'K8s Clusters in GCP w/ KAC':  'K8s Clusters — GCP (cloud-registered)',
+            'K8s Clusters with KAC':       'K8s Clusters (cloud-registered) †',
+            'K8s Clusters in AWS w/ KAC':  'K8s Clusters — AWS (cloud-registered) †',
+            'K8s Clusters in Azure w/ KAC':'K8s Clusters — Azure (cloud-registered) †',
+            'K8s Clusters in GCP w/ KAC':  'K8s Clusters — GCP (cloud-registered) †',
         }
+        _csa_vm_rows = {'AWS EC2', 'Azure Virtual Machines', 'GCP Compute Instances', 'OCI Compute Instances'}
         def _csa_row(row):
-            name   = _csa_display_names.get(row.get('name', ''), row.get('name', ''))
+            raw_name = row.get('name', '')
+            name     = _csa_display_names.get(raw_name, raw_name)
+            if raw_name in _csa_vm_rows:
+                name = name + ' &#9432;'
             total  = row.get('total_count', 0)
             with_s = row.get('with_sensors', 0)
             wout_s = row.get('without_sensors', 0)
@@ -846,7 +852,51 @@ def build_html(json_path, out_path):
                 f'</tr>{err_html}'
             )
 
-        _csa_table_rows = ''.join(_csa_row(r) for r in csa_rows)
+        # Build ECS Cluster synthetic row from cluster summary
+        _ecs_cl_total   = len(ecs_cluster_summary)
+        _ecs_cl_managed = sum(c.get('managed', 0) for c in ecs_cluster_summary)
+        _ecs_cl_without = sum(c.get('unmanaged', 0) for c in ecs_cluster_summary)
+        _ecs_cl_total   = _ecs_cl_managed + _ecs_cl_without
+        _ecs_cl_rate    = round(_ecs_cl_managed / _ecs_cl_total * 100, 1) if _ecs_cl_total else 0.0
+        _ecs_cl_row     = _csa_row({
+            'name': 'AWS ECS Clusters §',
+            'total_count': _ecs_cl_total,
+            'with_sensors': _ecs_cl_managed,
+            'without_sensors': _ecs_cl_without,
+            'coverage_rate': _ecs_cl_rate,
+            'estimated': False,
+            'errors': [],
+        }) if ecs_cluster_summary else ''
+
+        # Build AWS ECS Task Definitions row from latest-version family data if available
+        if ecs_td_family_summary:
+            _ecs_td_fam_total   = len(ecs_td_family_summary)
+            _ecs_td_fam_managed = sum(1 for f in ecs_td_family_summary if f.get('latest_patched'))
+            _ecs_td_fam_without = _ecs_td_fam_total - _ecs_td_fam_managed
+            _ecs_td_fam_rate    = round(_ecs_td_fam_managed / _ecs_td_fam_total * 100, 1) if _ecs_td_fam_total else 0.0
+            _ecs_td_override    = {
+                'name': 'AWS ECS Task Definitions ‡',
+                'total_count': _ecs_td_fam_total,
+                'with_sensors': _ecs_td_fam_managed,
+                'without_sensors': _ecs_td_fam_without,
+                'coverage_rate': _ecs_td_fam_rate,
+                'estimated': False,
+                'errors': [],
+            }
+        else:
+            _ecs_td_override = None
+
+        # Inject ECS Cluster row after AWS ECS Task Definitions in the table;
+        # replace the task def row with latest-version family counts if available
+        _csa_table_rows = ''
+        for _r in csa_rows:
+            if _r.get('name') == 'AWS ECS Task Definitions' and _ecs_td_override:
+                _csa_table_rows += _csa_row(_ecs_td_override)
+            else:
+                _csa_table_rows += _csa_row(_r)
+            if _r.get('name') == 'AWS ECS Task Definitions':
+                _csa_table_rows += _ecs_cl_row
+
         _csa_has_k8s    = any(r.get('name','').startswith('K8s Clusters') for r in csa_rows)
         _csa_has_est    = any(r.get('estimated') for r in csa_rows)
         _csa_has_td     = any(r.get('name') == 'AWS ECS Task Definitions' for r in csa_rows)
@@ -942,12 +992,27 @@ def build_html(json_path, out_path):
                 'sensor-equipped worker node, limited to clusters with KAC registered. '
                 'Clusters without KAC are counted as unprotected.</p>'
             )
+            _csa_notes += (
+                '<p class="note">&#9432; <strong>Cloud VM counts (AWS EC2, Azure VMs, GCP instances, etc.) may include K8s worker nodes.</strong> '
+                'Any cloud instance serving as a K8s worker node (EKS, AKS, GKE node pools) is covered '
+                'via K8s cluster sensor and reflected in the K8s Clusters rows above — yet may still '
+                'appear <em>unmanaged</em> in its cloud VM row if <code>managed_by:\'Sensor\'</code> '
+                'is not set on the cloud asset directly.</p>'
+            )
         if _csa_has_td:
             _csa_notes += (
-                '<p class="note">‡ AWS ECS Task Definitions coverage is determined by '
-                'inspecting the container configuration for Falcon sidecar indicators '
+                '<p class="note">‡ AWS ECS Task Definitions counts reflect <strong>task definition families</strong> '
+                '(unique family names), not individual revisions. Only the latest revision of each family '
+                'is evaluated for Falcon sensor presence via container config inspection '
                 '(image name, environment variables, volume mounts). '
                 'Does not rely on <code>managed_by:\'Sensor\'</code>.</p>'
+            )
+        if ecs_cluster_summary:
+            _csa_notes += (
+                '<p class="note">§ AWS ECS Clusters row shows task counts per cluster — '
+                'Managed/Unmanaged are the number of tasks with/without a Falcon sensor '
+                '(<code>managed_by:\'Sensor\'</code>). Not included in Total Cloud Assets '
+                'to avoid double-counting with the ECS Tasks row.</p>'
             )
 
         _cspm_block = f"""
@@ -980,6 +1045,7 @@ def build_html(json_path, out_path):
       ('* Estimated',      'Total count capped at API pagination limit (9,900); actual total and coverage % are approximate'),
       ('KAC',              'Kubernetes Admission Controller — Falcon admission webhook deployed to a cluster'),
       ('ECS Task Def',     'AWS ECS Task Definition; coverage detected via image/env/volume heuristic, not managed_by:Sensor'),
+      ('ECS Cluster',      'AWS ECS Cluster; managed = cluster has ≥1 task with a Falcon sensor (managed_by:Sensor). Derived from task-level data — not a standalone API count.'),
   ])}
   <p class="lead">
     Sensor coverage across cloud resource types visible in Falcon Cloud Security (CSPM/CSA),
@@ -1020,7 +1086,45 @@ def build_html(json_path, out_path):
       <strong>K8s cluster</strong> managed lists are derived from Hosts API hostname correlation and may be incomplete where CSA cluster names differ from Hosts API hostnames.
     </p>
     {_csa_mgd_drilldown if _csa_mgd_drilldown else '<p class="note">No managed cloud asset details available.</p>'}
-  </details>"""
+  </details>
+  {(lambda clusters: f"""<details style="margin-top:12px">
+    <summary style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;list-style:none;margin-bottom:4px">
+      <span class="sub-t" style="margin:0">&#9654; ECS Cluster Breakdown</span>
+    </summary>
+    <p class="note">Per-cluster task counts for AWS ECS Tasks, showing how many tasks
+    in each cluster have a Falcon sensor detected (<code>managed_by:\'Sensor\'</code>)
+    vs those that do not.</p>
+    {_table(
+        ['Cluster','Region','Account','Managed','Unmanaged','Total'],
+        [[c['cluster'],
+          c.get('region') or '—',
+          c.get('account_id') or '—',
+          f'<span style="color:{GREEN};font-weight:700">{_fmt(c["managed"])}</span>',
+          f'<span style="color:{ORANGE if c["unmanaged"] else GREY3};font-weight:700">{_fmt(c["unmanaged"])}</span>',
+          _fmt(c["managed"] + c["unmanaged"])]
+         for c in clusters]
+    ) if clusters else '<p class="note">No ECS cluster data available.</p>'}
+  </details>""")(ecs_cluster_summary)}
+  {(lambda fams: f"""<details style="margin-top:12px">
+    <summary style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;list-style:none;margin-bottom:4px">
+      <span class="sub-t" style="margin:0">&#9654; ECS Task Definition Families — Latest Version Coverage</span>
+    </summary>
+    <p class="note">Each row is one task definition <em>family</em>. Only the highest revision
+    of each family is evaluated for Falcon sensor presence — earlier revisions are ignored.
+    Coverage is detected via container config inspection (image name, env vars, volume mounts),
+    not <code>managed_by:\'Sensor\'</code>.</p>
+    {_table(
+        ['Family', 'Latest Rev', 'Region', 'Account', 'Sensor in Latest?'],
+        [[f'<span class="mono">{f["family"]}</span>',
+          str(f.get("latest_revision", "—")),
+          f.get("region") or "—",
+          f.get("account_id") or "—",
+          (f'<span style="color:{GREEN};font-weight:700">&#10003; Yes</span>'
+           if f.get("latest_patched")
+           else f'<span style="color:{RED};font-weight:700">&#10007; No</span>')]
+         for f in fams]
+    ) if fams else '<p class="note">No task definition family data available.</p>'}
+  </details>""")(ecs_td_family_summary)}"""
 
     # ── S5 → now K8s subsection of S4 ──────────────────────────
     _kac_csv_rows = [['Cluster','Cloud','Region','KAC','IAR','KAC Last Seen','Build']]
@@ -1317,8 +1421,8 @@ def build_html(json_path, out_path):
     s4 = ''
     if _cspm_block or _k8s_block:
         s4 = f"""
-<section id="s4">
-  {_sh(4, "Cloud &amp; Container Asset Coverage", CYAN)}
+<section id="s1">
+  {_sh(1, "Cloud &amp; Container Asset Coverage", CYAN)}
   {_cspm_block}
   {_k8s_block}
 </section>
@@ -1330,8 +1434,8 @@ def build_html(json_path, out_path):
     unsp_prod = unsp.get('by_product_type', {})
 
     s6 = f"""
-<section id="s6">
-  {_sh(6, "Unsupported Assets (Cannot be Managed)", GREY2)}
+<section id="s5">
+  {_sh(5, "Unsupported Assets (Cannot be Managed)", GREY2)}
   {_api_panel(
       apis=['Discover.query_hosts', 'Discover.get_hosts'],
       logic_items=[
@@ -1361,8 +1465,8 @@ def build_html(json_path, out_path):
     # ── S7: RECOMMENDATIONS ────────────────────────────────────
     recs = _recommendations(scoped_coverage, scoped_unmanaged, unsupported, managed, by_stat, gap_by_plat, k8s_total)
     s7 = f"""
-<section id="s7">
-  {_sh(7, "Recommendations", RED)}
+<section id="s6">
+  {_sh(6, "Recommendations", RED)}
   {_api_panel(
       apis=['(No direct API calls — computed from collected summary data)'],
       logic_items=[
@@ -1484,9 +1588,9 @@ def build_html(json_path, out_path):
         ])
 
     s8 = f"""
-<section id="s8">
+<section id="s7">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px">
-    {_sh(8, "Appendix — Asset Detail Lists", ORANGE)}
+    {_sh(7, "Appendix — Asset Detail Lists", ORANGE)}
   </div>
   {_api_panel(
       apis=['Discover.query_hosts', 'Discover.get_hosts'],
@@ -1576,13 +1680,13 @@ def build_html(json_path, out_path):
     CrowdStrike Falcon
   </div>
   <div class="nav-links">
-    <a href="#s1">Coverage</a>
-    <a href="#s2">Managed Hosts</a>
-    <a href="#s3">Cloud &amp; K8s</a>
-    <a href="#s4">Cloud &amp; Containers</a>
-    <a href="#s6">Unsupported</a>
-    <a href="#s7">Recommendations</a>
-    <a href="#s8">Appendix</a>
+    <a href="#s1">Cloud &amp; Containers</a>
+    <a href="#s2">Coverage</a>
+    <a href="#s3">Managed Hosts</a>
+    <a href="#s4">Cloud &amp; K8s</a>
+    <a href="#s5">Unsupported</a>
+    <a href="#s6">Recommendations</a>
+    <a href="#s7">Appendix</a>
   </div>
 </nav>"""
 
@@ -1631,10 +1735,10 @@ function exportCSV(key) {{
 <body>
 {nav}
 {cover}
+{s4}
 {s1}
 {s2}
 {s3}
-{s4}
 {s6}
 {s7}
 {s8}
