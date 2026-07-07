@@ -1135,7 +1135,6 @@ def build_html(json_path, out_path):
     if k8s_inv_summary:
         cov_data      = k8s_inv_summary.get('sensor_coverage', {})
         mgd_ctrs      = k8s_inv_summary.get('managed_containers', {})
-        by_runtime    = k8s_inv_summary.get('nodes_by_runtime', {})
         total_ctrs    = cov_data.get('total_containers', 0)
         covered_ctrs  = cov_data.get('covered_containers', 0)
         ctr_pct       = cov_data.get('coverage_pct', 0)
@@ -1146,12 +1145,15 @@ def build_html(json_path, out_path):
 
         nodes_list   = k8s_inv.get('nodes', [])
         active_nodes = [n for n in nodes_list if n.get('resource_status') != 'deleted']
-        # Recompute by_cloud from active nodes (summary may include deleted nodes if JSON was
-        # collected before the hosts_inventory.py fix was applied)
+        # Recompute by_cloud and by_runtime from active nodes (summary may include deleted nodes
+        # if JSON was collected before the hosts_inventory.py fix was applied)
         by_cloud: dict = {}
+        by_runtime: dict = {}
         for _n in active_nodes:
             _c = _n.get('cloud_name') or _n.get('cloud') or 'Unknown'
             by_cloud[_c] = by_cloud.get(_c, 0) + 1
+            _r = _n.get('container_runtime_version') or 'Unknown'
+            by_runtime[_r] = by_runtime.get(_r, 0) + 1
         display_nodes= sorted(active_nodes, key=lambda n:(n.get('cluster_name') or '', n.get('node_name') or ''))[:25]
 
         # Nodes without runtime Falcon sensor — breakdown for unmanaged container detail
