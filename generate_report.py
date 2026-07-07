@@ -652,7 +652,7 @@ def build_html(json_path, out_path):
   ])}
   <div class="note" style="margin-bottom:0.75rem">
     On-prem non-K8s assets (<strong>{_fmt(on_prem_excluded)}</strong> managed devices) are excluded from coverage math.
-    Full fleet breakdown is in <a href="#s2">Section 2 — Managed Hosts</a>.
+    Full fleet breakdown is in <a href="#s3">Section 3 — Managed Hosts</a>.
   </div>
   <div class="two-col">
     <div>
@@ -772,8 +772,8 @@ def build_html(json_path, out_path):
       ],
       fql="service_provider:['AWS_EC2','AZURE','GCP','AWS_EKS_FARGATE',...]",
       conflicts=[
-          '<strong>Cloud host count here &ne; CSA total in Section 4 (CSPM).</strong> This section counts only managed hosts with Falcon sensors running in cloud. Section 4 counts all cloud resources (managed or not) via the CloudSecurityAssets API — fundamentally different denominators.',
-          '<strong>K8s pod count here &ne; container count in Section 4 (Container Security).</strong> This section counts Falcon-instrumented pods via Hosts API (<code>pod_namespace</code> filter). Section 4 uses the KubernetesProtection API and counts all containers/pods cluster-wide, regardless of sensor presence. Expect S3 to be much lower than Section 4\'s "Total Containers."',
+          '<strong>Cloud host count here &ne; CSA total in Section 1 (CSPM).</strong> This section counts only managed hosts with Falcon sensors running in cloud. Section 1 counts all cloud resources (managed or not) via the CloudSecurityAssets API — fundamentally different denominators.',
+          '<strong>K8s pod count here &ne; container count in Section 1 (Container Security).</strong> This section counts Falcon-instrumented pods via Hosts API (<code>pod_namespace</code> filter). Section 1 uses the KubernetesProtection API and counts all containers/pods cluster-wide, regardless of sensor presence. Expect this section to be much lower than Section 1\'s "Total Containers."',
       ]
   )}
   {_legend([
@@ -859,7 +859,7 @@ def build_html(json_path, out_path):
         _ecs_cl_total   = _ecs_cl_managed + _ecs_cl_without
         _ecs_cl_rate    = round(_ecs_cl_managed / _ecs_cl_total * 100, 1) if _ecs_cl_total else 0.0
         _ecs_cl_row     = _csa_row({
-            'name': 'AWS ECS Clusters §',
+            'name': 'AWS ECS Cluster Tasks §',
             'total_count': _ecs_cl_total,
             'with_sensors': _ecs_cl_managed,
             'without_sensors': _ecs_cl_without,
@@ -1009,9 +1009,9 @@ def build_html(json_path, out_path):
             )
         if ecs_cluster_summary:
             _csa_notes += (
-                '<p class="note">§ AWS ECS Clusters row shows task counts per cluster — '
-                'Managed/Unmanaged are the number of tasks with/without a Falcon sensor '
-                '(<code>managed_by:\'Sensor\'</code>). Not included in Total Cloud Assets '
+                '<p class="note">§ AWS ECS Cluster Tasks row shows the total number of ECS tasks '
+                'running across all clusters — Managed/Unmanaged are the number of tasks with/without '
+                'a Falcon sensor (<code>managed_by:\'Sensor\'</code>). Not included in Total Cloud Assets '
                 'to avoid double-counting with the ECS Tasks row.</p>'
             )
 
@@ -1135,7 +1135,6 @@ def build_html(json_path, out_path):
     if k8s_inv_summary:
         cov_data      = k8s_inv_summary.get('sensor_coverage', {})
         mgd_ctrs      = k8s_inv_summary.get('managed_containers', {})
-        by_cloud      = k8s_inv_summary.get('nodes_by_cloud', {})
         by_runtime    = k8s_inv_summary.get('nodes_by_runtime', {})
         total_ctrs    = cov_data.get('total_containers', 0)
         covered_ctrs  = cov_data.get('covered_containers', 0)
@@ -1147,6 +1146,12 @@ def build_html(json_path, out_path):
 
         nodes_list   = k8s_inv.get('nodes', [])
         active_nodes = [n for n in nodes_list if n.get('resource_status') != 'deleted']
+        # Recompute by_cloud from active nodes (summary may include deleted nodes if JSON was
+        # collected before the hosts_inventory.py fix was applied)
+        by_cloud: dict = {}
+        for _n in active_nodes:
+            _c = _n.get('cloud_name') or _n.get('cloud') or 'Unknown'
+            by_cloud[_c] = by_cloud.get(_c, 0) + 1
         display_nodes= sorted(active_nodes, key=lambda n:(n.get('cluster_name') or '', n.get('node_name') or ''))[:25]
 
         # Nodes without runtime Falcon sensor — breakdown for unmanaged container detail
@@ -1156,11 +1161,11 @@ def build_html(json_path, out_path):
         _ctr_detail_table = _table(
             ['Metric', 'Count', 'Source API', 'Meaning'],
             [
-                [f'<span class="chip-g">Node sensor present (protected)</span>',
+                [f'<span class="chip-g">Protected containers</span>',
                  f'<strong>{_fmt(covered_ctrs)}</strong>',
                  '<code>read_sensor_coverage</code>',
                  'Containers running on a node with a Falcon DaemonSet sensor — the node sensor observes via eBPF kernel hooks and protects all containers on that node; no per-container agent needed'],
-                [f'<span class="chip-r">No node sensor (unprotected)</span>' if sensor_gap_ctrs else 'No node sensor (unprotected)',
+                [f'<span class="chip-r">Unprotected containers</span>' if sensor_gap_ctrs else 'Unprotected containers',
                  f'<strong>{_fmt(sensor_gap_ctrs)}</strong>',
                  '<code>read_sensor_coverage</code>',
                  'Containers known to Falcon (via KAC admission events or cloud API inventory) but running on nodes with no Falcon DaemonSet — no kernel-level visibility or protection'],
@@ -1382,18 +1387,18 @@ def build_html(json_path, out_path):
       ('K8s Cluster',                 'A registered Kubernetes cluster — may be cloud-managed (EKS/AKS/GKE) or self-hosted; visible via cloud integration or direct sensor registration'),
       ('K8s Node',                    'A worker VM inside a cluster that runs pods; the Falcon DaemonSet sensor runs here and protects all containers on the node via eBPF kernel hooks'),
       ('Pod',                         'A Kubernetes scheduling unit (one or more containers sharing network/storage); counted cluster-wide regardless of sensor'),
-      ('Node sensor present',         'Container is running on a node with a Falcon DaemonSet sensor — the node sensor provides kernel-level visibility and protection for every container on that node without needing a per-container agent'),
-      ('No node sensor',              'Container is known to Falcon (via KAC or cloud API) but its node has no Falcon DaemonSet — no runtime visibility or protection. These map directly to the nodes listed in the drilldown below.'),
+      ('Protected Containers',         'Container is running on a node with a Falcon DaemonSet sensor — the node sensor provides kernel-level visibility and protection for every container on that node without needing a per-container agent'),
+      ('Unprotected Containers',      'Container is known to Falcon (via KAC or cloud API) but its node has no Falcon DaemonSet — no runtime visibility or protection. These map directly to the nodes listed in the drilldown below.'),
       ('managed_by flag absent',      '<code>group_managed_containers</code> grouping — does NOT mean unprotected. A container on a sensored node is fully protected regardless of this flag.'),
       ('KAC',                         'Kubernetes Admission Controller — webhook that intercepts workloads at deploy time for policy enforcement and supplies container inventory to the denominator; does not itself provide runtime protection'),
       ('IAR',                         'Image Assessment & Response — Falcon scans container images before they run'),
   ])}
   {_stat_grid([
       ('Total Containers',            _fmt(total_ctrs),                                              GREY2),
-      ('Node Sensor Present',         _fmt(covered_ctrs),   GREEN),
-      ('No Node Sensor',              _fmt(sensor_gap_ctrs), RED if sensor_gap_ctrs else GREY2),
+      ('Protected Containers',         _fmt(covered_ctrs),   GREEN),
+      ('Unprotected Containers',      _fmt(sensor_gap_ctrs), RED if sensor_gap_ctrs else GREY2),
       ('K8s Clusters',                _fmt(k8s_inv_summary.get('cluster_count',0)),                  CYAN),
-      ('K8s Nodes',                   _fmt(k8s_inv_summary.get('node_count',0)),                     CYAN),
+      ('K8s Nodes',                   _fmt(len(active_nodes)),                                       CYAN),
       ('Pods',                        _fmt(k8s_inv_summary.get('pod_count',0)),                      CYAN),
   ], cols=3)}
   <p class="note"><strong>K8s Clusters</strong> sourced from the Kubernetes Protection API — includes all clusters visible via cloud integration or deployed sensor. This may differ from the <em>K8S platform</em> count in Managed Hosts, which only reflects clusters with a Falcon sensor registered through the Hosts API.</p>
@@ -1411,8 +1416,8 @@ def build_html(json_path, out_path):
   {_ctr_detail_table}
   {_no_sensor_node_tbl}
   <div class="two-col" style="margin-top:20px">
-    {_rank('Nodes by Cloud', sorted(by_cloud.items(),key=lambda x:-x[1]), k8s_inv_summary.get('node_count',1) or 1, CYAN)}
-    {_rank('Container Runtime', sorted(by_runtime.items(),key=lambda x:-x[1])[:8], k8s_inv_summary.get('node_count',1) or 1, GREEN)}
+    {_rank('Nodes by Cloud', sorted(by_cloud.items(),key=lambda x:-x[1]), len(active_nodes) or 1, CYAN)}
+    {_rank('Container Runtime', sorted(by_runtime.items(),key=lambda x:-x[1])[:8], len(active_nodes) or 1, GREEN)}
   </div>
   {nodes_tbl}
   {kac_section}"""
