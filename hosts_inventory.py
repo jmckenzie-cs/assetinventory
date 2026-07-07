@@ -704,21 +704,24 @@ def collect_k8s_nodes(k: KubernetesProtection) -> dict:
             for b in (item.get("buckets") or []):
                 managed_containers[b["label"]] = b["count"]
 
-    # Parse node counts by cloud
-    by_cloud: dict = {}
-    for item in by_cloud_raw:
-        if item.get("name") == "count_by_value":
-            by_cloud = {b["label"]: b["count"] for b in (item.get("buckets") or [])}
-
-    # Parse container runtime versions
+    # Parse container runtime versions (API aggregate — not affected by deleted nodes)
     by_runtime: dict = {}
     for item in by_runtime_raw:
         if item.get("name") == "count_by_value":
             by_runtime = {b["label"]: b["count"] for b in (item.get("buckets") or [])}
 
+    # Recompute node counts from the nodes list, excluding deleted nodes.
+    # The API aggregate endpoints (read_node_count, read_node_counts_by_cloud) include
+    # nodes with resource_status='deleted', which inflates counts significantly.
+    active_nodes = [n for n in nodes if (n.get("resource_status") or "").lower() != "deleted"]
+    by_cloud: dict = {}
+    for n in active_nodes:
+        cloud = n.get("cloud_name") or n.get("cloud") or "unknown"
+        by_cloud[cloud] = by_cloud.get(cloud, 0) + 1
+
     summary = {
         "cluster_count":    (cluster_cnt_raw[0].get("count") if cluster_cnt_raw else len(clusters)),
-        "node_count":       (node_cnt_raw[0].get("count") if node_cnt_raw else len(nodes)),
+        "node_count":       len(active_nodes),
         "pod_count":        (pod_count_raw[0].get("count") if pod_count_raw else 0),
         "container_count":  (container_cnt_raw[0].get("count") if container_cnt_raw else 0),
         "sensor_coverage":  sensor_coverage,
