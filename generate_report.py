@@ -1154,7 +1154,7 @@ def build_html(json_path, out_path):
             by_cloud[_c] = by_cloud.get(_c, 0) + 1
             _r = _n.get('container_runtime_version') or 'Unknown'
             by_runtime[_r] = by_runtime.get(_r, 0) + 1
-        display_nodes= sorted(active_nodes, key=lambda n:(n.get('cluster_name') or '', n.get('node_name') or ''))[:25]
+        display_nodes= sorted(active_nodes, key=lambda n:(n.get('cluster_name') or '', n.get('node_name') or ''))
 
         # Nodes without runtime Falcon sensor — breakdown for unmanaged container detail
         no_sensor_nodes = [n for n in active_nodes if not n.get('linux_sensor_coverage')]
@@ -1227,7 +1227,7 @@ def build_html(json_path, out_path):
             )
             nodes_tbl = (
                 f'<details><summary class="sub-t" style="cursor:pointer">'
-                f'Active K8s Nodes (showing {len(display_nodes)} of {len(active_nodes)})</summary>'
+                f'Active K8s Nodes ({len(active_nodes)})</summary>'
                 + _nodes_inner
                 + '</details>'
             )
