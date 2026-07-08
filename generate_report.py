@@ -1432,11 +1432,19 @@ def build_html(json_path, out_path):
     # ── Assemble merged S4 (CSPM + K8s) ───────────────────────
     s4 = ''
     if _cspm_block or _k8s_block:
+        _vm_tags_btn = (
+            f'<div style="text-align:right">'
+            f'<button class="export-btn" style="margin:0 0 4px 0" onclick="exportCSV(\'vm_cloud_tags\')"'
+            f' title="EC2, Azure VM, GCP &amp; OCI — both managed and unmanaged — with all cloud provider tags">'
+            f'&#8595; VM Cloud Tags CSV ({len(_vm_tagged):,} assets)</button>'
+            f'<div style="font-size:10px;color:#aaa;margin-top:2px">Includes managed &amp; unmanaged &nbsp;·&nbsp; filter on <code>sensor_present</code> column</div>'
+            f'</div>'
+        ) if _vm_tagged else ''
         s4 = f"""
 <section id="s1">
-  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px">
     {_sh(1, "Cloud &amp; Container Asset Coverage", CYAN)}
-    {'<button class="export-btn" style="margin:0" onclick="exportCSV(\'vm_cloud_tags\')" title="Download EC2, Azure VM, GCP &amp; OCI assets with all cloud tags">&#8595; VM Cloud Tags CSV (' + str(len(_vm_tagged)) + ' assets)</button>' if _vm_tagged else ''}
+    {_vm_tags_btn}
   </div>
   {_cspm_block}
   {_k8s_block}
