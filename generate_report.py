@@ -803,6 +803,7 @@ def build_html(json_path, out_path):
     _csa_mgd_csv_rows = [['Asset Type','Resource ID','Resource Name','Account ID','Region','Status']]
     _cspm_block = ''
     s4_csa = ''  # legacy alias; merged into s4 below
+    _vm_tagged = []
     if csa_cov and csa_cov.get('rows'):
         csa_rows                  = csa_cov.get('rows', [])
         csa_details               = csa_cov.get('details', {})
@@ -810,6 +811,7 @@ def build_html(json_path, out_path):
         csa_total_a               = csa_cov.get('total_assets', 0)
         ecs_cluster_summary       = csa_cov.get('ecs_cluster_summary', [])
         ecs_td_family_summary     = csa_cov.get('ecs_task_def_family_summary', [])
+        _vm_tagged                = csa_cov.get('vm_assets_tagged', [])
 
         # Overall coverage: sum(with_sensors) / sum(total) for non-KAC rows
         _csa_non_kac = [r for r in csa_rows if r.get('name') != 'K8s Clusters with KAC']
@@ -1432,7 +1434,10 @@ def build_html(json_path, out_path):
     if _cspm_block or _k8s_block:
         s4 = f"""
 <section id="s1">
-  {_sh(1, "Cloud &amp; Container Asset Coverage", CYAN)}
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+    {_sh(1, "Cloud &amp; Container Asset Coverage", CYAN)}
+    {'<button class="export-btn" style="margin:0" onclick="exportCSV(\'vm_cloud_tags\')" title="Download EC2, Azure VM, GCP &amp; OCI assets with all cloud tags">&#8595; VM Cloud Tags CSV (' + str(len(_vm_tagged)) + ' assets)</button>' if _vm_tagged else ''}
+  </div>
   {_cspm_block}
   {_k8s_block}
 </section>
@@ -1706,12 +1711,33 @@ def build_html(json_path, out_path):
         f'CONFIDENTIAL — authorized personnel only</footer>'
     )
 
+    # ── VM Cloud Tags CSV ──────────────────────────────────────────
+    _all_tag_keys  = sorted({k for a in _vm_tagged for k in (a.get('tags') or {})})
+    _vm_tags_csv_rows = [
+        ['asset_type', 'cloud', 'resource_id', 'resource_name',
+         'account_id', 'region', 'status', 'sensor_present']
+        + [f'tag:{k}' for k in _all_tag_keys]
+    ]
+    for _a in _vm_tagged:
+        _tags = _a.get('tags') or {}
+        _vm_tags_csv_rows.append([
+            _a.get('asset_type', ''),
+            _a.get('cloud', ''),
+            _a.get('resource_id', ''),
+            _a.get('resource_name', ''),
+            _a.get('account_id', ''),
+            _a.get('region', ''),
+            _a.get('status', ''),
+            'true' if _a.get('sensor_present') else 'false',
+        ] + [_tags.get(k, '') for k in _all_tag_keys])
+
     _js_data = json.dumps({
         'unmanaged_assets':   {'filename': 'unmanaged_assets.csv',      'rows': _unmanaged_csv_rows},
         'kac_clusters':       {'filename': 'kac_iar_clusters.csv',       'rows': _kac_csv_rows},
         'csa_unprotected':    {'filename': 'csa_unprotected_assets.csv', 'rows': _csa_csv_rows},
         'csa_managed_assets': {'filename': 'csa_managed_assets.csv',     'rows': _csa_mgd_csv_rows},
         'unsupported_assets': {'filename': 'unsupported_assets.csv',     'rows': _unsupported_csv_rows},
+        'vm_cloud_tags':      {'filename': f'vm_cloud_tags_{meta.get("generated_at","")[:10]}.csv', 'rows': _vm_tags_csv_rows},
     }, ensure_ascii=False)
 
     _js = f"""<script>

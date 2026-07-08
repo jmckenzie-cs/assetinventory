@@ -1244,6 +1244,54 @@ def _csa_get_k8s_managed_assets(csa: CloudSecurityAssets, h: Hosts,
     return {"assets": managed, "total": len(managed), "shown": len(managed)}
 
 
+_VM_TAG_TYPES = [
+    {"name": "AWS EC2",
+     "fql":  "resource_type:'AWS::EC2::Instance'+active:true",
+     "resource_type": "AWS::EC2::Instance",
+     "cloud": "aws"},
+    {"name": "Azure Virtual Machines",
+     "fql":  "cloud_provider:'azure'+resource_type:'Microsoft.Compute/virtualMachines'+active:true",
+     "resource_type": "Microsoft.Compute/virtualMachines",
+     "cloud": "azure"},
+    {"name": "GCP Compute Instances",
+     "fql":  "cloud_provider:'gcp'+resource_type:'compute.googleapis.com/Instance'+active:true",
+     "resource_type": "compute.googleapis.com/Instance",
+     "cloud": "gcp"},
+    {"name": "OCI Compute Instances",
+     "fql":  "cloud_provider:'oci'+active:true",
+     "resource_type": "OCI Compute",
+     "cloud": "oci"},
+]
+
+
+def _csa_get_vm_assets_with_tags(csa: CloudSecurityAssets) -> list:
+    """Fetch all EC2, Azure VM, GCP, and OCI compute assets with cloud tags.
+
+    Returns a flat list of dicts — one per asset — including sensor_present flag
+    and a tags dict.  No cap: all assets are fetched.
+    """
+    assets = []
+    for vt in _VM_TAG_TYPES:
+        fql  = vt["fql"]
+        all_ids    = _csa_get_all_ids(csa, fql)
+        sensor_ids = set(_csa_get_all_ids(csa, fql + _CSA_SENSOR_FQL))
+        for i in range(0, len(all_ids), 100):
+            resp = csa.get_assets(ids=all_ids[i:i + 100])
+            for r in (resp.get("body") or {}).get("resources") or []:
+                assets.append({
+                    "asset_type":     vt["name"],
+                    "cloud":          vt["cloud"],
+                    "resource_id":    r.get("resource_id"),
+                    "resource_name":  r.get("resource_name"),
+                    "account_id":     r.get("account_id"),
+                    "region":         r.get("region"),
+                    "status":         r.get("status"),
+                    "sensor_present": r.get("resource_id") in sensor_ids,
+                    "tags":           r.get("tags") or {},
+                })
+    return assets
+
+
 def collect_csa_coverage(csa: CloudSecurityAssets, h: Hosts) -> dict:
     """Collect sensor coverage for cloud resource types visible in Falcon CSPM.
 
@@ -1352,10 +1400,15 @@ def collect_csa_coverage(csa: CloudSecurityAssets, h: Hosts) -> dict:
     ecs_cluster_summary = _csa_get_ecs_cluster_summary(csa)
     print(f"    {len(ecs_cluster_summary)} ECS cluster(s) found")
 
+    print("  → VM cloud tags (EC2, Azure, GCP, OCI) …")
+    vm_assets_tagged = _csa_get_vm_assets_with_tags(csa)
+    print(f"    {len(vm_assets_tagged):,} VM assets with tags")
+
     return {"total_assets": total_assets, "rows": rows, "details": details,
             "managed_details": managed_details,
             "ecs_cluster_summary": ecs_cluster_summary,
-            "ecs_task_def_family_summary": ecs_td_family_summary}
+            "ecs_task_def_family_summary": ecs_td_family_summary,
+            "vm_assets_tagged": vm_assets_tagged}
 
 
 def _host_container_status(h: dict) -> str:
