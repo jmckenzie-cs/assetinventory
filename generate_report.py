@@ -1433,12 +1433,9 @@ def build_html(json_path, out_path):
     s4 = ''
     if _cspm_block or _k8s_block:
         _vm_tags_btn = (
-            f'<div style="text-align:right;white-space:nowrap">'
-            f'<button class="export-btn" style="margin:0 0 3px 0" onclick="exportCSV(\'vm_cloud_tags\')"'
+            f'<button class="export-btn" style="margin:0;flex-shrink:0" onclick="exportCSV(\'vm_cloud_tags\')"'
             f' title="EC2, Azure VM, GCP &amp; OCI — includes both managed and unmanaged assets. Filter the sensor_present column to slice by coverage.">'
             f'&#8595; VM Cloud Tags CSV ({len(_vm_tagged):,} assets)</button>'
-            f'<div style="font-size:10px;color:#aaa">managed &amp; unmanaged &nbsp;·&nbsp; <code>sensor_present</code> column</div>'
-            f'</div>'
         ) if _vm_tagged else ''
         s4 = f"""
 <section id="s1">
